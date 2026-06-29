@@ -4,340 +4,311 @@
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
   <title>controlhub — a teaching instrument</title>
-  <link rel="stylesheet" href="style.css" />
+  <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
 
-  <!-- ═══════════════════════════ HEADER ═══════════════════════════ -->
-  <header class="header">
-    <div class="header-inner">
-      <div class="brand">
-        <div class="brand-icon">
-          <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-            <circle cx="20" cy="20" r="17" stroke="currentColor" stroke-width="2"/>
-            <circle cx="20" cy="20" r="9"  stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
-            <circle cx="20" cy="20" r="3"  fill="currentColor"/>
-          </svg>
-        </div>
-        <div class="brand-text">
-          <span class="brand-name">controlhub</span>
-          <span class="brand-sub">a teaching instrument</span>
-        </div>
+<!-- ═══ HEADER ══════════════════════════════════════════════════════════════ -->
+<header class="header">
+  <div class="header-inner">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="20" cy="20" r="17" stroke="currentColor" stroke-width="2"/>
+          <circle cx="20" cy="20" r="9"  stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
+          <circle cx="20" cy="20" r="3"  fill="currentColor"/>
+        </svg>
       </div>
-
-      <div class="header-right">
-        <div class="status-pill" id="statusPill">
-          <span class="status-dot" id="statusDot"></span>
-          <span id="statusLabel">disconnected</span>
-        </div>
-        <button class="icon-btn" id="settingsBtn" title="Configure backend URL">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <circle cx="12" cy="12" r="3"/>
-            <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
-          </svg>
-        </button>
-        <button class="icon-btn" id="demoBtn" title="Toggle demo mode">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
-            <polygon points="5 3 19 12 5 21 5 3"/>
-          </svg>
-        </button>
+      <div class="brand-text">
+        <span class="brand-name">controlhub</span>
+        <span class="brand-sub">a teaching instrument</span>
       </div>
     </div>
-  </header>
-
-  <!-- ═══════════════════════════ SETTINGS PANEL ═══════════════════════════ -->
-  <div class="settings-overlay" id="settingsOverlay">
-    <div class="settings-panel">
-      <div class="settings-header">
-        <span>backend configuration</span>
-        <button class="icon-btn" id="settingsClose">
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
-            <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
-          </svg>
-        </button>
+    <div class="header-right">
+      <div class="status-pill" id="status-pill">
+        <span class="status-dot" id="status-dot"></span>
+        <span id="status-label">disconnected</span>
       </div>
-      <div class="settings-body">
-        <label class="field-label">Render backend URL</label>
-        <input class="field-input" id="backendUrl" type="url"
-          placeholder="https://your-eeg-backend.onrender.com" />
-        <p class="field-hint">
-          The backend must expose <code>/stream</code> (SSE) and <code>/reading</code> (polling fallback).<br/>
-          See <em>API Contract</em> below for the expected endpoint spec.
-        </p>
-        <div class="settings-actions">
-          <button class="btn-secondary" id="testConnectionBtn">Test connection</button>
-          <button class="btn-primary" id="saveSettingsBtn">Save &amp; connect</button>
+      <!-- Bluetooth -->
+      <button class="icon-btn" id="btn-bluetooth" title="Connect Bluetooth headband">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"/>
+        </svg>
+      </button>
+      <!-- Settings -->
+      <button class="icon-btn" id="btn-settings" title="Configure">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <circle cx="12" cy="12" r="3"/>
+          <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/>
+        </svg>
+      </button>
+      <!-- Demo -->
+      <button class="icon-btn" id="btn-demo" title="Toggle demo mode">
+        <svg id="demo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8">
+          <polygon points="5 3 19 12 5 21 5 3"/>
+        </svg>
+      </button>
+    </div>
+  </div>
+</header>
+
+<!-- ═══ SETTINGS OVERLAY ════════════════════════════════════════════════════ -->
+<div class="settings-overlay" id="settings-overlay">
+  <div class="settings-panel">
+    <div class="settings-header">
+      <span>configuration</span>
+      <button class="icon-btn" id="btn-close-settings">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+    <div class="settings-body">
+
+      <!-- Bluetooth section -->
+      <div class="bt-section">
+        <div class="bt-section-title">Bluetooth Headband</div>
+        <div id="bt-device-row" class="bt-device-row" style="display:none">
+          <span class="bt-device-dot"></span>
+          <span class="bt-device-name" id="bt-device-name">—</span>
+          <button class="bt-disconnect-btn" id="btn-bt-disconnect">Disconnect</button>
         </div>
-        <div class="api-contract">
-          <p class="contract-title">Expected API Contract</p>
-          <pre><code>GET  /status   → { connected, board, uptime_seconds }
-GET  /reading  → latest epoch JSON (polling)
-GET  /stream   → text/event-stream (SSE)
-POST /start    → start pipeline
-POST /stop     → stop pipeline</code></pre>
-          <p class="contract-title" style="margin-top:14px">SSE / Polling payload shape</p>
+        <button class="bt-connect-btn" id="btn-bt-scan">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <path d="M6.5 6.5l11 11L12 23V1l5.5 5.5-11 11"/>
+          </svg>
+          Scan &amp; Connect Headband
+        </button>
+        <p class="bt-hint">
+          Works with Muse, BrainBit, and any BLE EEG headband. Raw EEG is
+          collected for 2 s then sent to your Render backend for full
+          Random-Forest classification — or processed locally if no backend
+          is configured. Requires <code>Chrome</code> or <code>Edge</code>.
+        </p>
+      </div>
+
+      <div class="divider"></div>
+
+      <!-- Backend URL section -->
+      <div class="backend-section">
+        <div class="backend-section-title">Render Backend URL</div>
+        <label class="field-label">Backend URL</label>
+        <input class="field-input" type="url" id="input-backend-url"
+               placeholder="https://your-eeg-backend.onrender.com" />
+        <p class="field-hint">
+          The backend must expose <code>POST /analyze</code> (raw EEG) and
+          optionally <code>POST /analyze/bands</code> (pre-computed powers).
+        </p>
+        <div id="test-msg" style="display:none;font-size:12px;padding:4px 0;"></div>
+        <div class="settings-actions">
+          <button class="btn-secondary" id="btn-test">Test connection</button>
+          <button class="btn-primary"   id="btn-save">Save &amp; connect</button>
+        </div>
+
+        <div class="api-contract" style="margin-top:16px">
+          <p class="contract-title">Raw EEG endpoint</p>
+          <pre><code>POST /analyze
+{
+  "eeg_data": [[ch0_s0, ch0_s1, ...], [ch1_s0, ...]],
+  "sample_rate": 256
+}</code></pre>
+          <p class="contract-title" style="margin-top:12px">Pre-computed bands endpoint</p>
+          <pre><code>POST /analyze/bands
+{ "delta": 0.12, "theta": 0.22, "alpha": 0.41,
+  "beta": 0.18, "gamma": 0.07 }</code></pre>
+          <p class="contract-title" style="margin-top:12px">Response (both endpoints)</p>
           <pre><code>{
-  "timestamp": "12:34:56.789 UTC",
-  "epoch": 42,
-  "latency_ms": 45.2,
-  "data_quality": "✓ clean",
-  "chitta_bhumi": {
-    "state": "Ekagra",
-    "depth": "Deep",
-    "confidence": "82.3%",
-    "probabilities": {
-      "Ekagra":    "82.3%",
-      "Niruddha":  "10.1%",
-      "Vikshipta":  "5.2%",
-      "Kshipta":    "2.4%"
-    }
-  },
-  "swara": {
-    "state": "Ida Nadi — right hemisphere dominant",
-    "confidence": "Moderate",
-    "note": "..."
-  },
-  "band_powers": {
-    "relative": {
-      "delta": 0.12,
-      "theta": 0.25,
-      "alpha": 0.38,
-      "beta":  0.18,
-      "gamma": 0.07
-    }
-  },
-  "alpha_asymmetry": -0.05,
-  "tattva_flags": ["Pratyahara Window"],
-  "contemplative_depth": "Deep"
+  "chitta_bhumi": { "state": "Ekagra", "confidence": "82.4%" },
+  "swara":        { "state": "Ida (Parasympathetic)" },
+  "tattva":       ["Pratyahara Window detected"],
+  "depth":        "Deep",
+  "eeg_spectrum": { "alpha": 41.2, "theta": 28.0,
+                    "delta": 12.0, "beta": 14.0, "gamma": 4.8 }
 }</code></pre>
         </div>
       </div>
     </div>
   </div>
+</div>
 
-  <!-- ═══════════════════════════ MAIN ═══════════════════════════ -->
-  <main class="main">
+<!-- ═══ MAIN ═════════════════════════════════════════════════════════════════ -->
+<main class="main">
 
-    <!-- EEG canvas strip -->
-    <section class="canvas-section">
-      <canvas id="eegCanvas"></canvas>
-      <div class="canvas-overlay">
-        <div class="epoch-badge">
-          <span class="epoch-label">EPOCH</span>
-          <span class="epoch-num" id="epochNum">—</span>
-        </div>
-        <div class="quality-badge" id="qualityBadge">
-          <span id="qualityText">awaiting signal</span>
-        </div>
-        <div class="latency-badge">
-          <span id="latencyText">— ms</span>
-          <span class="epoch-label">LATENCY</span>
-        </div>
+  <!-- EEG canvas strip -->
+  <section class="canvas-section">
+    <canvas id="eeg-canvas"></canvas>
+    <div class="canvas-overlay">
+      <div class="epoch-badge">
+        <span class="epoch-label">EPOCH</span>
+        <span class="epoch-num" id="val-epoch">—</span>
       </div>
-    </section>
-
-    <!-- ─────────── TOP GRID ─────────── -->
-    <div class="top-grid">
-
-      <!-- CHITTA BHUMI -->
-      <div class="card chitta-card" id="chittaCard">
-        <div class="card-tag">CHITTA BHUMI</div>
-        <div class="chitta-state-name" id="chittaStateName">—</div>
-        <div class="chitta-depth-label" id="chittaDepthLabel">awaiting signal</div>
-        <div class="chitta-depth-track">
-          <div class="chitta-depth-fill" id="chittaDepthFill"></div>
-          <div class="chitta-depth-nodes">
-            <span data-state="Kshipta">Kshipta</span>
-            <span data-state="Vikshipta">Vikshipta</span>
-            <span data-state="Ekagra">Ekagra</span>
-            <span data-state="Niruddha">Niruddha</span>
-          </div>
-        </div>
-        <div class="chitta-confidence">
-          <span class="card-tag">CONFIDENCE</span>
-          <span id="chittaConfidence">—</span>
-        </div>
+      <div class="quality-badge">
+        <span id="val-quality">awaiting signal</span>
       </div>
-
-      <!-- PROBABILITIES -->
-      <div class="card prob-card">
-        <div class="card-tag">STATE PROBABILITIES</div>
-        <div class="prob-list" id="probList">
-          <div class="prob-row" data-state="Kshipta">
-            <span class="prob-name">Kshipta</span>
-            <div class="prob-track"><div class="prob-fill" style="width:0%"></div></div>
-            <span class="prob-val">—</span>
-          </div>
-          <div class="prob-row" data-state="Vikshipta">
-            <span class="prob-name">Vikshipta</span>
-            <div class="prob-track"><div class="prob-fill" style="width:0%"></div></div>
-            <span class="prob-val">—</span>
-          </div>
-          <div class="prob-row" data-state="Ekagra">
-            <span class="prob-name">Ekagra</span>
-            <div class="prob-track"><div class="prob-fill" style="width:0%"></div></div>
-            <span class="prob-val">—</span>
-          </div>
-          <div class="prob-row" data-state="Niruddha">
-            <span class="prob-name">Niruddha</span>
-            <div class="prob-track"><div class="prob-fill" style="width:0%"></div></div>
-            <span class="prob-val">—</span>
-          </div>
-        </div>
-
-        <div class="contemplative-row">
-          <span class="card-tag">CONTEMPLATIVE DEPTH</span>
-          <span class="depth-pill" id="contemplativeDepth">—</span>
-        </div>
+      <div class="latency-badge">
+        <span class="latency-num" id="val-latency">— ms</span>
+        <span class="epoch-label">LATENCY</span>
       </div>
+    </div>
+  </section>
 
-      <!-- SWARA -->
-      <div class="card swara-card" id="swaraCard">
-        <div class="card-tag">SWARA NADI</div>
-        <div class="swara-glyph-row">
-          <div class="swara-glyph" id="swaraIda">
-            <div class="glyph-symbol">🌙</div>
-            <div class="glyph-label">Ida</div>
-            <div class="glyph-sub">lunar · left</div>
-          </div>
-          <div class="swara-center-line">
-            <div class="center-dot"></div>
-          </div>
-          <div class="swara-glyph" id="swaraSushumna">
-            <div class="glyph-symbol">⚖️</div>
-            <div class="glyph-label">Sushumna</div>
-            <div class="glyph-sub">balanced</div>
-          </div>
-          <div class="swara-center-line">
-            <div class="center-dot"></div>
-          </div>
-          <div class="swara-glyph" id="swaraPingala">
-            <div class="glyph-symbol">☀️</div>
-            <div class="glyph-label">Pingala</div>
-            <div class="glyph-sub">solar · right</div>
-          </div>
-        </div>
-        <div class="swara-asymmetry-track">
-          <span class="asym-label">L</span>
-          <div class="asym-bar">
-            <div class="asym-fill" id="asymFill"></div>
-            <div class="asym-center"></div>
-            <div class="asym-thumb" id="asymThumb"></div>
-          </div>
-          <span class="asym-label">R</span>
-        </div>
-        <div class="swara-details">
-          <div class="swara-state-text" id="swaraState">—</div>
-          <div class="swara-confidence-row">
-            <span class="card-tag">CONFIDENCE</span>
-            <span id="swaraConfidence">—</span>
-          </div>
-          <div class="swara-note" id="swaraNote"></div>
-        </div>
+  <!-- Top grid -->
+  <div class="top-grid">
+
+    <!-- Chitta Bhumi -->
+    <div class="card chitta-card" id="chitta-card">
+      <span class="card-tag">CHITTA BHUMI</span>
+      <div class="chitta-state-name" id="val-state">—</div>
+      <div class="chitta-depth-label" id="val-depth-label">awaiting signal</div>
+      <div class="chitta-depth-track">
+        <div class="chitta-depth-fill" id="chitta-fill" style="width:0%"></div>
       </div>
-
-    </div><!-- /top-grid -->
-
-    <!-- ─────────── BAND POWERS ─────────── -->
-    <div class="card band-card">
-      <div class="card-tag">SPECTRAL BAND POWERS</div>
-      <div class="band-grid">
-        <div class="band-col" data-band="delta">
-          <div class="band-bar-wrap">
-            <div class="band-bar-track">
-              <div class="band-bar-fill" id="bandDelta" style="height:0%"></div>
-            </div>
-          </div>
-          <div class="band-info">
-            <span class="band-name">δ Delta</span>
-            <span class="band-val" id="bandDeltaVal">—</span>
-            <span class="band-hz">1–4 Hz</span>
-          </div>
-        </div>
-        <div class="band-col" data-band="theta">
-          <div class="band-bar-wrap">
-            <div class="band-bar-track">
-              <div class="band-bar-fill" id="bandTheta" style="height:0%"></div>
-            </div>
-          </div>
-          <div class="band-info">
-            <span class="band-name">θ Theta</span>
-            <span class="band-val" id="bandThetaVal">—</span>
-            <span class="band-hz">4–8 Hz</span>
-          </div>
-        </div>
-        <div class="band-col" data-band="alpha">
-          <div class="band-bar-wrap">
-            <div class="band-bar-track">
-              <div class="band-bar-fill" id="bandAlpha" style="height:0%"></div>
-            </div>
-          </div>
-          <div class="band-info">
-            <span class="band-name">α Alpha</span>
-            <span class="band-val" id="bandAlphaVal">—</span>
-            <span class="band-hz">8–13 Hz</span>
-          </div>
-        </div>
-        <div class="band-col" data-band="beta">
-          <div class="band-bar-wrap">
-            <div class="band-bar-track">
-              <div class="band-bar-fill" id="bandBeta" style="height:0%"></div>
-            </div>
-          </div>
-          <div class="band-info">
-            <span class="band-name">β Beta</span>
-            <span class="band-val" id="bandBetaVal">—</span>
-            <span class="band-hz">13–30 Hz</span>
-          </div>
-        </div>
-        <div class="band-col" data-band="gamma">
-          <div class="band-bar-wrap">
-            <div class="band-bar-track">
-              <div class="band-bar-fill" id="bandGamma" style="height:0%"></div>
-            </div>
-          </div>
-          <div class="band-info">
-            <span class="band-name">γ Gamma</span>
-            <span class="band-val" id="bandGammaVal">—</span>
-            <span class="band-hz">30–50 Hz</span>
-          </div>
-        </div>
+      <div class="chitta-depth-nodes">
+        <span data-s="Kshipta">Kshipta</span>
+        <span data-s="Vikshipta">Vikshipta</span>
+        <span data-s="Ekagra">Ekagra</span>
+        <span data-s="Niruddha">Niruddha</span>
+      </div>
+      <div class="chitta-confidence">
+        <span class="card-tag" style="margin-bottom:0">CONFIDENCE</span>
+        <span id="val-confidence">—</span>
       </div>
     </div>
 
-    <!-- ─────────── TATTVA FLAGS ─────────── -->
-    <div class="tattva-section" id="tattvaSection">
-      <div class="card-tag">TATTVA / CHAKRA CORRELATES</div>
-      <div class="tattva-flags" id="tattvaFlags">
-        <span class="tattva-empty">no flags active</span>
+    <!-- State Probabilities -->
+    <div class="card prob-card">
+      <span class="card-tag">STATE PROBABILITIES</span>
+      <div class="prob-list">
+        <div class="prob-row" data-state="Kshipta">
+          <span class="prob-name">Kshipta</span>
+          <div class="prob-track"><div class="prob-fill" id="prob-Kshipta" style="width:0%"></div></div>
+          <span class="prob-val" id="probval-Kshipta">—</span>
+        </div>
+        <div class="prob-row" data-state="Vikshipta">
+          <span class="prob-name">Vikshipta</span>
+          <div class="prob-track"><div class="prob-fill" id="prob-Vikshipta" style="width:0%"></div></div>
+          <span class="prob-val" id="probval-Vikshipta">—</span>
+        </div>
+        <div class="prob-row" data-state="Ekagra">
+          <span class="prob-name">Ekagra</span>
+          <div class="prob-track"><div class="prob-fill" id="prob-Ekagra" style="width:0%"></div></div>
+          <span class="prob-val" id="probval-Ekagra">—</span>
+        </div>
+        <div class="prob-row" data-state="Niruddha">
+          <span class="prob-name">Niruddha</span>
+          <div class="prob-track"><div class="prob-fill" id="prob-Niruddha" style="width:0%"></div></div>
+          <span class="prob-val" id="probval-Niruddha">—</span>
+        </div>
+      </div>
+      <div class="contemplative-row">
+        <span class="card-tag" style="margin-bottom:0">CONTEMPLATIVE DEPTH</span>
+        <span class="depth-pill" id="depth-pill">—</span>
       </div>
     </div>
 
-    <!-- ─────────── FOOTER ─────────── -->
-    <footer class="data-footer">
-      <span class="footer-item">
-        <span class="footer-label">TIMESTAMP</span>
-        <span id="footerTimestamp">—</span>
-      </span>
-      <span class="footer-sep"></span>
-      <span class="footer-item">
-        <span class="footer-label">BOARD</span>
-        <span id="footerBoard">—</span>
-      </span>
-      <span class="footer-sep"></span>
-      <span class="footer-item">
-        <span class="footer-label">UPTIME</span>
-        <span id="footerUptime">—</span>
-      </span>
-      <span class="footer-sep"></span>
-      <span class="footer-item" style="margin-left:auto">
-        <span class="footer-label">MODE</span>
-        <span id="footerMode">—</span>
-      </span>
-    </footer>
+    <!-- Swara Nadi -->
+    <div class="card swara-card">
+      <span class="card-tag">SWARA NADI</span>
+      <div class="swara-glyph-row">
+        <div class="swara-glyph" id="glyph-ida">
+          <div class="glyph-symbol">🌙</div>
+          <div class="glyph-label">Ida</div>
+          <div class="glyph-sub">lunar · left</div>
+        </div>
+        <div class="swara-center-line"><div class="center-dot"></div></div>
+        <div class="swara-glyph" id="glyph-sushumna">
+          <div class="glyph-symbol">⚖️</div>
+          <div class="glyph-label">Sushumna</div>
+          <div class="glyph-sub">balanced</div>
+        </div>
+        <div class="swara-center-line"><div class="center-dot"></div></div>
+        <div class="swara-glyph" id="glyph-pingala">
+          <div class="glyph-symbol">☀️</div>
+          <div class="glyph-label">Pingala</div>
+          <div class="glyph-sub">solar · right</div>
+        </div>
+      </div>
+      <div class="swara-asymmetry-track">
+        <span class="asym-label">L</span>
+        <div class="asym-bar" id="asym-bar">
+          <div class="asym-fill" id="asym-fill"></div>
+          <div class="asym-center"></div>
+          <div class="asym-thumb" id="asym-thumb"></div>
+        </div>
+        <span class="asym-label">R</span>
+      </div>
+      <div class="swara-details">
+        <div class="swara-state-text" id="val-swara-state">—</div>
+        <div class="swara-confidence-row">
+          <span class="card-tag" style="margin-bottom:0">CONFIDENCE</span>
+          <span id="val-swara-conf">—</span>
+        </div>
+        <div class="swara-note" id="val-swara-note" style="display:none"></div>
+      </div>
+    </div>
 
-  </main>
+  </div><!-- /top-grid -->
 
-  <script src="app.js"></script>
+  <!-- Band powers -->
+  <div class="card band-card">
+    <span class="card-tag">SPECTRAL BAND POWERS</span>
+    <div class="band-grid">
+      <div class="band-col" data-band="delta">
+        <div class="band-bar-wrap"><div class="band-bar-track"><div class="band-bar-fill" id="band-delta" style="height:0%"></div></div></div>
+        <div class="band-info"><span class="band-name">δ Delta</span><span class="band-val" id="bandval-delta">—</span><span class="band-hz">1–4 Hz</span></div>
+      </div>
+      <div class="band-col" data-band="theta">
+        <div class="band-bar-wrap"><div class="band-bar-track"><div class="band-bar-fill" id="band-theta" style="height:0%"></div></div></div>
+        <div class="band-info"><span class="band-name">θ Theta</span><span class="band-val" id="bandval-theta">—</span><span class="band-hz">4–8 Hz</span></div>
+      </div>
+      <div class="band-col" data-band="alpha">
+        <div class="band-bar-wrap"><div class="band-bar-track"><div class="band-bar-fill" id="band-alpha" style="height:0%"></div></div></div>
+        <div class="band-info"><span class="band-name">α Alpha</span><span class="band-val" id="bandval-alpha">—</span><span class="band-hz">8–13 Hz</span></div>
+      </div>
+      <div class="band-col" data-band="beta">
+        <div class="band-bar-wrap"><div class="band-bar-track"><div class="band-bar-fill" id="band-beta" style="height:0%"></div></div></div>
+        <div class="band-info"><span class="band-name">β Beta</span><span class="band-val" id="bandval-beta">—</span><span class="band-hz">13–30 Hz</span></div>
+      </div>
+      <div class="band-col" data-band="gamma">
+        <div class="band-bar-wrap"><div class="band-bar-track"><div class="band-bar-fill" id="band-gamma" style="height:0%"></div></div></div>
+        <div class="band-info"><span class="band-name">γ Gamma</span><span class="band-val" id="bandval-gamma">—</span><span class="band-hz">30–50 Hz</span></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Tattva flags -->
+  <div class="tattva-section">
+    <span class="card-tag">TATTVA / CHAKRA CORRELATES</span>
+    <div class="tattva-flags" id="tattva-flags">
+      <span class="tattva-empty">no flags active</span>
+    </div>
+  </div>
+
+  <!-- Footer -->
+  <footer class="data-footer">
+    <span class="footer-item">
+      <span class="footer-label">TIMESTAMP</span>
+      <span id="val-timestamp">—</span>
+    </span>
+    <span class="footer-sep"></span>
+    <span class="footer-item">
+      <span class="footer-label">BOARD</span>
+      <span id="val-board">—</span>
+    </span>
+    <span class="footer-sep"></span>
+    <span class="footer-item">
+      <span class="footer-label">BUFFER</span>
+      <span id="val-buffer">0 / 512</span>
+    </span>
+    <span class="footer-sep"></span>
+    <span class="footer-item" style="margin-left:auto">
+      <span class="footer-label">MODE</span>
+      <span id="val-mode">—</span>
+    </span>
+  </footer>
+
+</main>
+
+<script src="./app.js"></script>
 </body>
 </html>
