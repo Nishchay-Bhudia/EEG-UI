@@ -31,7 +31,7 @@ const SWARA_NOTES = {
 
 // ── State ─────────────────────────────────────────────────────────────────────
 let mode         = 'idle';    // idle | demo | bluetooth | backend
-let backendUrl   = localStorage.getItem('controlhub_url') || '';
+let backendUrl   = localStorage.getItem('controlhub_url') || 'https://eeg-backend-5.onrender.com';
 let btDevice     = null;
 let btDisconnect = null;
 let demoTimer    = null;
@@ -468,6 +468,20 @@ function makeDemoReading() {
   };
 }
 
+async function sendDemoToBackend(bp) {
+  if (!backendUrl) return null;
+  try {
+    const res = await fetch(backendUrl.replace(/\/$/, '') + '/analyze/bands', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(bp),
+      signal: AbortSignal.timeout(6000),
+    });
+    if (!res.ok) throw new Error('HTTP ' + res.status);
+    return await res.json();
+  } catch { return null; }
+}
+
 function startDemo() {
   stopAll();
   mode = 'demo';
@@ -475,8 +489,38 @@ function startDemo() {
   setStatus('demo', 'demo mode');
   btnDemo.classList.add('active');
   demoIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
-  $('val-mode').textContent = 'synthetic demo';
-  const tick = () => { const r = makeDemoReading(); applyReading(r); };
+  $('val-mode').textContent = backendUrl ? 'demo \u2192 Render' : 'synthetic demo';
+
+  const tick = async () => {
+    const r = makeDemoReading();
+    if (backendUrl) {
+      const bp = r.band_powers.relative;
+      const t0 = performance.now();
+      const data = await sendDemoToBackend(bp);
+      if (data) {
+        // merge backend response over the local demo reading
+        const latency = (performance.now() - t0).toFixed(1);
+        applyReading({
+          ...r,
+          latency_ms: parseFloat(latency),
+          data_quality: '\u2713 demo \u2192 Render',
+          chitta_bhumi: {
+            state:         data.chitta_bhumi?.state       || r.chitta_bhumi.state,
+            depth:         data.chitta_bhumi?.depth       || data.depth || r.chitta_bhumi.depth,
+            confidence:    data.chitta_bhumi?.confidence  || r.chitta_bhumi.confidence,
+            probabilities: data.chitta_bhumi?.probabilities || r.chitta_bhumi.probabilities,
+          },
+          swara:       { state: data.swara?.state || r.swara.state, confidence: r.swara.confidence, note: r.swara.note },
+          tattva_flags: data.tattva || r.tattva_flags,
+          contemplative_depth: data.depth || r.contemplative_depth,
+          eeg_spectrum: data.eeg_spectrum || null,
+        });
+        return;
+      }
+    }
+    applyReading(r);
+  };
+
   tick();
   demoTimer = setInterval(tick, DEMO_INTERVAL);
 }
@@ -695,39 +739,21 @@ function onBtDisconnected() {
   if (mode === 'bluetooth') disconnectBluetooth();
 }
 
-// ── Backend URL mode (SSE/polling) ────────────────────────────────────────────
-let sseSource  = null;
-let pollTimer  = null;
-
-function connectBackendUrl(url) {
-  stopAll();
+// ── Backend URL mode ──────────────────────────────────────────────────────────
+// This backend only accepts POST /analyze and POST /analyze/bands.
+// We ping the root to verify it's alive, then wait for Bluetooth data.
+async function connectBackendUrl(url) {
   mode = 'backend';
-  setStatus('connected', 'live');
-  $('val-mode').textContent = 'SSE / polling';
-
-  // Try SSE first
+  setStatus('', 'checking backend\u2026');
+  $('val-board').textContent = 'Render backend';
+  $('val-mode').textContent  = 'BLE \u2192 Render';
   try {
-    sseSource = new EventSource(url + '/stream');
-    sseSource.onmessage = e => {
-      try { applyReading(JSON.parse(e.data)); } catch { /* ignore */ }
-    };
-    sseSource.onerror = () => {
-      sseSource.close(); sseSource = null;
-      startPolling(url);
-    };
+    await fetch(url.replace(/\/$/, '') + '/', { signal: AbortSignal.timeout(8000) });
+    setStatus('connected', 'backend ready');
   } catch {
-    startPolling(url);
+    // Backend may not have a GET / but POST /analyze might still work
+    setStatus('connected', 'backend ready');
   }
-}
-
-function startPolling(url) {
-  pollTimer = setInterval(async () => {
-    try {
-      const res  = await fetch(url + '/reading', { signal: AbortSignal.timeout(4000) });
-      const data = await res.json();
-      applyReading(data);
-    } catch { /* ignore */ }
-  }, 1000);
 }
 
 // ── Stop everything ───────────────────────────────────────────────────────────
@@ -818,3 +844,9 @@ window.addEventListener('resize', () => { resizeCanvas(); });
 resizeCanvas();
 requestAnimationFrame(drawWave);
 $('val-buffer').textContent = '0 / ' + COLLECT_N;
+
+// Auto-connect to backend on load
+if (backendUrl) {
+  inputUrl.value = backendUrl;
+  connectBackendUrl(backendUrl);
+}
