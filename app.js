@@ -39,6 +39,9 @@ let epoch        = 0;
 let demoStateIdx = 0;
 let demoSwaraIdx = 0;
 let demoEpoch    = 0;
+let pollTimer       = null;  // referenced in stopAll(); must be declared
+let sseSource       = null;  // referenced in stopAll(); must be declared
+let backendPollTimer = null;  // polls /status until model_ready
 
 // BLE EEG collection buffers (one array per channel, up to 4 channels)
 const bleChannels = [[], [], [], []];
@@ -475,7 +478,7 @@ async function sendDemoToBackend(bp) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(bp),
-      signal: AbortSignal.timeout(3000),
+      signal: AbortSignal.timeout(10000),
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return await res.json();
@@ -711,7 +714,7 @@ async function processAndPost() {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ eeg_data: snapshot, sample_rate: SAMPLE_RATE }),
-        signal: AbortSignal.timeout(8000),
+        signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
       const data = await res.json();
@@ -767,26 +770,53 @@ function onBtDisconnected() {
 }
 
 // ── Backend URL mode ──────────────────────────────────────────────────────────
-// This backend only accepts POST /analyze and POST /analyze/bands.
-// We ping the root to verify it's alive, then wait for Bluetooth data.
-async function connectBackendUrl(url) {
-  mode = 'backend';
-  setStatus('', 'checking backend\u2026');
-  $('val-board').textContent = 'Render backend';
-  $('val-mode').textContent  = 'BLE \u2192 Render';
-  try {
-    await fetch(url.replace(/\/$/, '') + '/', { signal: AbortSignal.timeout(8000) });
-    setStatus('connected', 'backend ready');
-  } catch {
-    // Backend may not have a GET / but POST /analyze might still work
-    setStatus('connected', 'backend ready');
+  // Polls /status until model_ready:true (Render free tier cold-starts ~30 s).
+  // "connected" is only shown when the backend genuinely says model_ready:true.
+  async function connectBackendUrl(url) {
+    if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = null; }
+    mode = 'backend';
+    setStatus('waking', 'waking up…');
+    $('val-board').textContent = 'Render backend';
+    $('val-mode').textContent  = 'BLE → Render';
+
+    let attempts = 0;
+    const MAX = 40; // 40 × 1.5 s = 60 s max cold-start wait
+
+    const poll = async () => {
+      attempts++;
+      try {
+        const res = await fetch(url.replace(/\/$/, '') + '/status', {
+          signal: AbortSignal.timeout(5000),
+        });
+        if (res.ok) {
+          const data = await res.json();
+          if (data.model_ready) {
+            clearInterval(backendPollTimer); backendPollTimer = null;
+            setStatus('connected', 'backend ready');
+          } else {
+            setStatus('waking', 'model loading…');
+          }
+        } else {
+          setStatus('waking', 'waking up…');
+        }
+      } catch {
+        if (attempts >= MAX) {
+          clearInterval(backendPollTimer); backendPollTimer = null;
+          setStatus('error', 'backend offline');
+        }
+      }
+    };
+
+    await poll();
+    if (backendPollTimer === null && mode === 'backend') return; // already resolved
+    backendPollTimer = setInterval(poll, 1500);
   }
-}
 
 // ── Stop everything ───────────────────────────────────────────────────────────
 function stopAll() {
   clearInterval(demoTimer);  demoTimer = null;
   clearInterval(pollTimer);  pollTimer = null;
+  clearInterval(backendPollTimer); backendPollTimer = null;
   if (sseSource) { sseSource.close(); sseSource = null; }
   if (mode === 'bluetooth') disconnectBluetooth();
   mode = 'idle';
