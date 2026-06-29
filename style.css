@@ -68,6 +68,8 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); min-
 .status-pill.error      .status-dot { background: #C75C5C; }
 .status-pill.bluetooth  { border-color: #5B8DB844; background: #EDF3F9; color: #3A6A8A; }
 .status-pill.bluetooth  .status-dot { background: #5B8DB8; box-shadow: 0 0 6px #5B8DB880; animation: pulse-dot 2s infinite; }
+.status-pill.waking    { border-color: #C49A2244; background: #FFFBEC; color: #7A5F00; }
+.status-pill.waking    .status-dot { background: #C49A22; animation: pulse-dot 0.8s infinite; }
 @keyframes pulse-dot { 0%,100% { opacity:1; } 50% { opacity:0.4; } }
 
 .icon-btn { width: 34px; height: 34px; border-radius: var(--radius-sm); background: transparent; border: 1px solid var(--border); color: var(--text-mid); display: flex; align-items: center; justify-content: center; cursor: pointer; transition: background 0.2s, border-color 0.2s, color 0.2s; }
