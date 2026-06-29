@@ -475,15 +475,56 @@ async function sendDemoToBackend(bp) {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(bp),
-      signal: AbortSignal.timeout(6000),
+      signal: AbortSignal.timeout(3000),
     });
     if (!res.ok) throw new Error('HTTP ' + res.status);
     return await res.json();
-  } catch { return null; }
+  } catch (err) {
+    if (err instanceof TypeError) showCorsWarning();
+    return null;
+  }
+}
+
+function showCorsWarning() {
+  // Only show once per session
+  if (showCorsWarning._shown) return;
+  showCorsWarning._shown = true;
+  $('val-quality').textContent = '⚠ CORS blocked — see console';
+  console.warn(
+    '%c[controlhub] CORS error\n' +
+    'Your Render backend is blocking requests from this origin.\n' +
+    'Add this to your Flask/FastAPI backend:\n\n' +
+    '  from flask_cors import CORS\n' +
+    '  CORS(app, origins=["https://eeg-pi.vercel.app", "http://localhost"])\n\n' +
+    'or in FastAPI:\n' +
+    '  app.add_middleware(CORSMiddleware,\n' +
+    '    allow_origins=["https://eeg-pi.vercel.app"],\n' +
+    '    allow_methods=["*"], allow_headers=["*"])',
+    'color:#D97757;font-size:13px'
+  );
+}
+
+function mergeBackendResponse(r, data) {
+  const t0stamp = new Date().toISOString().slice(11,22)+' UTC';
+  return {
+    ...r,
+    data_quality: '\u2713 demo \u2192 Render',
+    chitta_bhumi: {
+      state:         data.chitta_bhumi?.state        || r.chitta_bhumi.state,
+      depth:         data.chitta_bhumi?.depth        || data.depth || r.chitta_bhumi.depth,
+      confidence:    data.chitta_bhumi?.confidence   || r.chitta_bhumi.confidence,
+      probabilities: data.chitta_bhumi?.probabilities || r.chitta_bhumi.probabilities,
+    },
+    swara:              { state: data.swara?.state || r.swara.state, confidence: r.swara.confidence, note: r.swara.note },
+    tattva_flags:       data.tattva        || r.tattva_flags,
+    contemplative_depth:data.depth         || r.contemplative_depth,
+    eeg_spectrum:       data.eeg_spectrum  || null,
+  };
 }
 
 function startDemo() {
   stopAll();
+  showCorsWarning._shown = false;
   mode = 'demo';
   demoStateIdx = demoSwaraIdx = demoEpoch = 0;
   setStatus('demo', 'demo mode');
@@ -491,34 +532,19 @@ function startDemo() {
   demoIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
   $('val-mode').textContent = backendUrl ? 'demo \u2192 Render' : 'synthetic demo';
 
-  const tick = async () => {
+  const tick = () => {
     const r = makeDemoReading();
-    if (backendUrl) {
-      const bp = r.band_powers.relative;
-      const t0 = performance.now();
-      const data = await sendDemoToBackend(bp);
-      if (data) {
-        // merge backend response over the local demo reading
-        const latency = (performance.now() - t0).toFixed(1);
-        applyReading({
-          ...r,
-          latency_ms: parseFloat(latency),
-          data_quality: '\u2713 demo \u2192 Render',
-          chitta_bhumi: {
-            state:         data.chitta_bhumi?.state       || r.chitta_bhumi.state,
-            depth:         data.chitta_bhumi?.depth       || data.depth || r.chitta_bhumi.depth,
-            confidence:    data.chitta_bhumi?.confidence  || r.chitta_bhumi.confidence,
-            probabilities: data.chitta_bhumi?.probabilities || r.chitta_bhumi.probabilities,
-          },
-          swara:       { state: data.swara?.state || r.swara.state, confidence: r.swara.confidence, note: r.swara.note },
-          tattva_flags: data.tattva || r.tattva_flags,
-          contemplative_depth: data.depth || r.contemplative_depth,
-          eeg_spectrum: data.eeg_spectrum || null,
-        });
-        return;
-      }
-    }
+    // ── Show local data immediately — never block ──
     applyReading(r);
+    // ── Then enhance with backend response in the background ──
+    if (backendUrl) {
+      const t0 = performance.now();
+      sendDemoToBackend(r.band_powers.relative).then(data => {
+        if (data && mode === 'demo') {
+          applyReading({ ...mergeBackendResponse(r, data), latency_ms: parseFloat((performance.now()-t0).toFixed(1)) });
+        }
+      });
+    }
   };
 
   tick();
@@ -709,7 +735,8 @@ async function processAndPost() {
       });
       return;
     } catch (err) {
-      console.warn('Backend /analyze failed, falling back to local FFT:', err.message);
+      if (err instanceof TypeError) showCorsWarning();
+      else console.warn('Backend /analyze failed, falling back to local FFT:', err.message);
     }
   }
 
