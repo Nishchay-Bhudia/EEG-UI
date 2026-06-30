@@ -1,36 +1,37 @@
 /* ════════════════════════════════════════════════════════════════════════════
-   controlhub — app.js
+   EEG DEV TESTING — app.js
    Modes: demo | bluetooth+backend | bluetooth-local | backend-url
+   Auth:  Login → Session management → Admin dashboard
    ════════════════════════════════════════════════════════════════════════════ */
 
 'use strict';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const SAMPLE_RATE   = 256;          // Hz assumed for connected device
-const COLLECT_SECS  = 2;            // seconds of EEG to buffer before posting
-const COLLECT_N     = SAMPLE_RATE * COLLECT_SECS;  // 512 samples per channel
-const WAVE_LEN      = 300;          // ring-buffer length for canvas
-const DEMO_INTERVAL = 1200;         // ms between demo readings
+const SAMPLE_RATE   = 256;
+const COLLECT_SECS  = 2;
+const COLLECT_N     = SAMPLE_RATE * COLLECT_SECS;
+const WAVE_LEN      = 300;
+const DEMO_INTERVAL = 1200;
 
 const MUSE_SERVICE_UUID = '0000fe8d-0000-1000-8000-00805f9b34fb';
 const MUSE_CONTROL_UUID = '273e0001-4c4d-454d-96be-f03bac821358';
 const MUSE_EEG_UUIDS    = [
-  '273e0003-4c4d-454d-96be-f03bac821358', // TP9
-  '273e0004-4c4d-454d-96be-f03bac821358', // AF7
-  '273e0005-4c4d-454d-96be-f03bac821358', // AF8
-  '273e0006-4c4d-454d-96be-f03bac821358', // TP10
+  '273e0003-4c4d-454d-96be-f03bac821358',
+  '273e0004-4c4d-454d-96be-f03bac821358',
+  '273e0005-4c4d-454d-96be-f03bac821358',
+  '273e0006-4c4d-454d-96be-f03bac821358',
 ];
 
-const DEPTH_PCT   = { Surface: 12, Emerging: 37, Deep: 62, Profound: 94 };
-const CHITTA_DEPTHS = { Kshipta: 'Surface', Vikshipta: 'Emerging', Ekagra: 'Deep', Niruddha: 'Profound' };
-const SWARA_NOTES = {
+const DEPTH_PCT      = { Surface: 12, Emerging: 37, Deep: 62, Profound: 94 };
+const CHITTA_DEPTHS  = { Kshipta: 'Surface', Vikshipta: 'Emerging', Ekagra: 'Deep', Niruddha: 'Profound' };
+const SWARA_NOTES    = {
   ida:       'Parasympathetic dominance. Receptive, creative and introspective state.',
   pingala:   'Sympathetic dominance. Active, analytical and goal-directed focus.',
   sushumna:  'Equilibrium of solar and lunar channels. Gateway to higher contemplative states.',
 };
 
-// ── State ─────────────────────────────────────────────────────────────────────
-let mode         = 'idle';    // idle | demo | bluetooth | backend
+// ── App state ─────────────────────────────────────────────────────────────────
+let mode         = 'idle';
 let backendUrl   = localStorage.getItem('controlhub_url') || 'https://eeg-backend-5.onrender.com';
 let btDevice     = null;
 let btDisconnect = null;
@@ -39,41 +40,547 @@ let epoch        = 0;
 let demoStateIdx = 0;
 let demoSwaraIdx = 0;
 let demoEpoch    = 0;
-let pollTimer       = null;  // referenced in stopAll(); must be declared
-let sseSource       = null;  // referenced in stopAll(); must be declared
-let backendPollTimer = null;  // polls /status until model_ready
+let pollTimer       = null;
+let sseSource       = null;
+let backendPollTimer = null;
 
-// BLE EEG collection buffers (one array per channel, up to 4 channels)
+// Auth state
+let currentUser = null; // { id, username, role }
+
+// Session state
+let activeSession      = null; // { id, name, startTime }
+let sessionTimerInterval = null;
+let notesSaveTimeout   = null;
+
 const bleChannels = [[], [], [], []];
 let   blePhase    = 0;
 let   bleSamTick  = 0;
 
-// Wave ring-buffer for canvas
 const waveBuf  = new Float32Array(WAVE_LEN);
 let   waveTail = 0;
 let   wavePhase = 0;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
-const canvas       = $('eeg-canvas');
-const ctx          = canvas.getContext('2d');
-const statusPill   = $('status-pill');
-const statusDot    = $('status-dot');
-const statusLabel  = $('status-label');
-const settingsOverlay = $('settings-overlay');
-const btDeviceRow  = $('bt-device-row');
-const btDeviceName = $('bt-device-name');
-const btnBt        = $('btn-bluetooth');
-const btnSettings  = $('btn-settings');
-const btnDemo      = $('btn-demo');
-const demoIcon     = $('demo-icon');
-const inputUrl     = $('input-backend-url');
-const testMsg      = $('test-msg');
+
+// ── API helpers ───────────────────────────────────────────────────────────────
+async function api(method, path, body) {
+  const opts = {
+    method,
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (body !== undefined) opts.body = JSON.stringify(body);
+  const res = await fetch('/api' + path, opts);
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: res.status });
+  return data;
+}
+
+// ── AUTH ──────────────────────────────────────────────────────────────────────
+async function checkAuth() {
+  try {
+    currentUser = await api('GET', '/auth/me');
+    showMainApp();
+  } catch {
+    showLoginScreen();
+  }
+}
+
+function showLoginScreen() {
+  $('login-screen').style.display = 'flex';
+  $('main-header').style.display  = 'none';
+  $('main-content').style.display = 'none';
+}
+
+function showMainApp() {
+  $('login-screen').style.display = 'none';
+  $('main-header').style.display  = '';
+  $('main-content').style.display = '';
+
+  // Update user menu
+  $('user-avatar-initial').textContent = (currentUser.username[0] || '?').toUpperCase();
+  $('user-display-name').textContent   = currentUser.username;
+  $('user-menu-role').textContent      = currentUser.role;
+
+  if (currentUser.role === 'admin') {
+    $('btn-open-admin').style.display = '';
+  } else {
+    $('btn-open-admin').style.display = 'none';
+  }
+
+  // Start canvas
+  resizeCanvas();
+  requestAnimationFrame(drawWave);
+  $('val-buffer').textContent = '0 / ' + COLLECT_N;
+
+  if (backendUrl) {
+    $('input-backend-url').value = backendUrl;
+    connectBackendUrl(backendUrl);
+  }
+
+  // Load sessions
+  loadSessionHistory();
+}
+
+// Login form
+$('login-form').addEventListener('submit', async e => {
+  e.preventDefault();
+  const username = $('login-username').value.trim();
+  const password = $('login-password').value;
+  const errEl    = $('login-error');
+  const btn      = $('login-submit-btn');
+
+  errEl.style.display = 'none';
+  btn.disabled = true;
+  btn.textContent = 'Signing in…';
+
+  try {
+    currentUser = await api('POST', '/auth/login', { username, password });
+    showMainApp();
+  } catch (err) {
+    errEl.textContent   = err.message || 'Invalid credentials';
+    errEl.style.display = '';
+    btn.disabled = false;
+    btn.textContent = 'Sign In';
+    $('login-password').value = '';
+  }
+});
+
+// Logout
+$('btn-logout').addEventListener('click', async () => {
+  closeUserMenu();
+  stopAll();
+  await api('POST', '/auth/logout').catch(() => {});
+  currentUser = null;
+  activeSession = null;
+  clearInterval(sessionTimerInterval);
+  showLoginScreen();
+});
+
+// ── USER MENU ─────────────────────────────────────────────────────────────────
+$('btn-user-menu').addEventListener('click', () => {
+  const dd = $('user-menu-dropdown');
+  dd.style.display = dd.style.display === 'none' ? '' : 'none';
+});
+
+document.addEventListener('click', e => {
+  if (!e.target.closest('.user-menu-wrap')) closeUserMenu();
+});
+
+function closeUserMenu() {
+  $('user-menu-dropdown').style.display = 'none';
+}
+
+// ── SESSION MANAGEMENT ────────────────────────────────────────────────────────
+$('btn-start-session').addEventListener('click', async () => {
+  const name = $('session-name-input').value.trim();
+  try {
+    const session = await api('POST', '/sessions', { name });
+    activeSession = { id: session.id, name: session.name, startTime: new Date(session.startTime) };
+    onSessionStarted();
+    await loadSessionHistory();
+  } catch (err) {
+    alert('Failed to start session: ' + err.message);
+  }
+});
+
+$('btn-end-session').addEventListener('click', async () => {
+  if (!activeSession) return;
+  try {
+    // Save notes first
+    await saveNotes(true);
+    await api('PUT', '/sessions/' + activeSession.id + '/end', {});
+    onSessionEnded();
+    await loadSessionHistory();
+  } catch (err) {
+    alert('Failed to end session: ' + err.message);
+  }
+});
+
+function onSessionStarted() {
+  $('session-start-area').style.display = 'none';
+  $('session-active-area').style.display = '';
+  $('session-notes-area').style.display = '';
+  $('active-session-name').textContent = activeSession.name;
+  $('session-notes-input').value = '';
+  $('notes-save-status').textContent = '';
+  $('session-name-input').value = '';
+  startSessionTimer();
+}
+
+function onSessionEnded() {
+  activeSession = null;
+  clearInterval(sessionTimerInterval);
+  $('session-start-area').style.display = '';
+  $('session-active-area').style.display = 'none';
+  $('session-notes-area').style.display = 'none';
+  $('session-notes-input').value = '';
+}
+
+function startSessionTimer() {
+  clearInterval(sessionTimerInterval);
+  sessionTimerInterval = setInterval(() => {
+    if (!activeSession) return;
+    const elapsed = Math.floor((Date.now() - activeSession.startTime.getTime()) / 1000);
+    const m = Math.floor(elapsed / 60), s = elapsed % 60;
+    $('active-session-timer').textContent = m + ':' + String(s).padStart(2, '0');
+  }, 1000);
+}
+
+// Notes autosave
+$('session-notes-input').addEventListener('input', () => {
+  $('notes-save-status').textContent = 'unsaved…';
+  clearTimeout(notesSaveTimeout);
+  notesSaveTimeout = setTimeout(() => saveNotes(false), 1500);
+});
+
+async function saveNotes(force) {
+  if (!activeSession) return;
+  const content = $('session-notes-input').value;
+  try {
+    await api('PUT', '/sessions/' + activeSession.id + '/notes', { content });
+    if (!force) {
+      $('notes-save-status').textContent = 'saved';
+      setTimeout(() => { $('notes-save-status').textContent = ''; }, 2000);
+    }
+  } catch {
+    $('notes-save-status').textContent = 'save failed';
+  }
+}
+
+// Session history
+let historyVisible = false;
+
+$('btn-toggle-history').addEventListener('click', async () => {
+  historyVisible = !historyVisible;
+  $('session-history-list').style.display = historyVisible ? '' : 'none';
+  $('btn-toggle-history').textContent = historyVisible ? 'Hide' : 'Show';
+  if (historyVisible) await loadSessionHistory();
+});
+
+async function loadSessionHistory() {
+  try {
+    const sessions = await api('GET', '/sessions');
+    renderSessionHistory(sessions);
+  } catch {
+    // silently fail if not authenticated yet
+  }
+}
+
+function renderSessionHistory(sessions) {
+  const list = $('session-history-list');
+  const emptyEl = $('history-empty');
+
+  // Remove all children except the empty message
+  Array.from(list.children).forEach(el => {
+    if (el !== emptyEl) el.remove();
+  });
+
+  if (!sessions || sessions.length === 0) {
+    emptyEl.style.display = '';
+    return;
+  }
+  emptyEl.style.display = 'none';
+
+  sessions.forEach(s => {
+    const isActive = activeSession && activeSession.id === s.id;
+    const item = document.createElement('div');
+    item.className = 'session-history-item' + (isActive ? ' active-session' : '');
+
+    const dur = s.duration
+      ? formatDuration(s.duration)
+      : (isActive ? 'in progress' : '—');
+
+    item.innerHTML = `
+      <span class="session-history-name">${escHtml(s.name)}</span>
+      <div class="session-history-meta">
+        <span class="session-history-date">${formatDate(s.startTime)}</span>
+        <span class="session-history-dur">${dur}</span>
+      </div>
+      <span class="session-history-status${s.endTime ? ' ended' : ''}">
+        ${s.endTime ? 'ended' : 'active'}
+      </span>
+    `;
+
+    list.appendChild(item);
+  });
+}
+
+function formatDuration(secs) {
+  const h = Math.floor(secs / 3600);
+  const m = Math.floor((secs % 3600) / 60);
+  const s = secs % 60;
+  if (h > 0) return `${h}h ${m}m`;
+  if (m > 0) return `${m}m ${s}s`;
+  return `${s}s`;
+}
+
+function formatDate(iso) {
+  if (!iso) return '—';
+  const d = new Date(iso);
+  return d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+    + ' ' + d.toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' });
+}
+
+function escHtml(str) {
+  return String(str).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
+// ── ADMIN DASHBOARD ───────────────────────────────────────────────────────────
+$('btn-open-admin').addEventListener('click', () => {
+  closeUserMenu();
+  openAdmin();
+});
+
+$('btn-close-admin').addEventListener('click', closeAdmin);
+$('admin-overlay').addEventListener('click', e => {
+  if (e.target === $('admin-overlay')) closeAdmin();
+});
+
+function openAdmin() {
+  $('admin-overlay').style.display = 'flex';
+  loadAdminData('users');
+}
+
+function closeAdmin() {
+  $('admin-overlay').style.display = 'none';
+  $('reset-pwd-modal').style.display = 'none';
+}
+
+// Admin tabs
+document.querySelectorAll('.admin-tab').forEach(tab => {
+  tab.addEventListener('click', () => {
+    document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+    document.querySelectorAll('.admin-tab-content').forEach(tc => tc.style.display = 'none');
+    tab.classList.add('active');
+    const target = tab.dataset.tab;
+    $('admin-tab-' + target).style.display = '';
+    loadAdminData(target);
+  });
+});
+
+async function loadAdminData(tab) {
+  if (tab === 'users') await loadAdminUsers();
+  else if (tab === 'sessions') await loadAdminSessions();
+  else if (tab === 'notes') await loadAdminNotes();
+}
+
+// ─ Users tab ─
+$('btn-add-user').addEventListener('click', () => {
+  $('admin-add-user-form').style.display = '';
+  $('new-username').focus();
+});
+$('btn-cancel-add-user').addEventListener('click', () => {
+  $('admin-add-user-form').style.display = 'none';
+  $('add-user-msg').textContent = '';
+});
+
+$('btn-create-user').addEventListener('click', async () => {
+  const username = $('new-username').value.trim();
+  const password = $('new-password').value;
+  const role     = $('new-role').value;
+  const msgEl    = $('add-user-msg');
+
+  if (!username || !password) {
+    msgEl.className = 'admin-msg error';
+    msgEl.textContent = 'Username and password are required.';
+    return;
+  }
+
+  try {
+    await api('POST', '/users', { username, password, role });
+    msgEl.className = 'admin-msg success';
+    msgEl.textContent = `User "${username}" created successfully.`;
+    $('new-username').value = '';
+    $('new-password').value = '';
+    await loadAdminUsers();
+  } catch (err) {
+    msgEl.className = 'admin-msg error';
+    msgEl.textContent = err.message;
+  }
+});
+
+async function loadAdminUsers() {
+  const tbody = $('users-tbody');
+  tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);font-style:italic">Loading…</td></tr>';
+  try {
+    const users = await api('GET', '/users');
+    tbody.innerHTML = '';
+    if (!users.length) {
+      tbody.innerHTML = '<tr><td colspan="4" style="color:var(--text-muted);font-style:italic">No users found</td></tr>';
+      return;
+    }
+    users.forEach(u => {
+      const tr = document.createElement('tr');
+      const isSelf = currentUser && u.id === currentUser.id;
+      tr.innerHTML = `
+        <td style="font-weight:600;color:var(--text)">${escHtml(u.username)}${isSelf ? ' <span style="font-size:10px;color:var(--text-muted)">(you)</span>' : ''}</td>
+        <td><span class="admin-role-badge ${u.role}">${u.role}</span></td>
+        <td style="font-size:12px">${formatDate(u.createdAt)}</td>
+        <td>
+          <div class="admin-actions-cell">
+            <button class="admin-action-btn" data-action="reset-pwd" data-uid="${u.id}" data-uname="${escHtml(u.username)}">Reset Password</button>
+            ${!isSelf ? `<button class="admin-action-btn danger" data-action="delete-user" data-uid="${u.id}" data-uname="${escHtml(u.username)}">Delete</button>` : ''}
+          </div>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="4" style="color:#A03A3A">${escHtml(err.message)}</td></tr>`;
+  }
+}
+
+// User table action delegation
+$('users-tbody').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-action]');
+  if (!btn) return;
+  const action = btn.dataset.action;
+  const uid    = parseInt(btn.dataset.uid, 10);
+  const uname  = btn.dataset.uname;
+
+  if (action === 'reset-pwd') {
+    openResetPwdModal(uid, uname);
+  } else if (action === 'delete-user') {
+    if (!confirm(`Delete user "${uname}"? This cannot be undone.`)) return;
+    try {
+      await api('DELETE', '/users/' + uid);
+      await loadAdminUsers();
+    } catch (err) {
+      alert('Failed to delete user: ' + err.message);
+    }
+  }
+});
+
+let resetPwdTargetId = null;
+function openResetPwdModal(uid, uname) {
+  resetPwdTargetId = uid;
+  $('reset-pwd-input').value = '';
+  $('reset-pwd-modal').style.display = 'flex';
+  $('reset-pwd-input').focus();
+}
+$('btn-cancel-reset-pwd').addEventListener('click', () => {
+  $('reset-pwd-modal').style.display = 'none';
+  resetPwdTargetId = null;
+});
+$('btn-confirm-reset-pwd').addEventListener('click', async () => {
+  const pwd = $('reset-pwd-input').value;
+  if (!pwd) { alert('Enter a new password.'); return; }
+  try {
+    await api('PUT', '/users/' + resetPwdTargetId + '/password', { password: pwd });
+    $('reset-pwd-modal').style.display = 'none';
+    resetPwdTargetId = null;
+    alert('Password reset successfully.');
+  } catch (err) {
+    alert('Failed: ' + err.message);
+  }
+});
+
+// ─ Sessions tab ─
+$('admin-session-search').addEventListener('input', () => {
+  const q = $('admin-session-search').value.toLowerCase();
+  document.querySelectorAll('#admin-sessions-tbody tr').forEach(tr => {
+    const user = tr.querySelector('[data-username]')?.dataset.username || '';
+    tr.style.display = user.includes(q) ? '' : 'none';
+  });
+});
+
+async function loadAdminSessions() {
+  const tbody = $('admin-sessions-tbody');
+  tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);font-style:italic">Loading…</td></tr>';
+  try {
+    const sessions = await api('GET', '/sessions');
+    tbody.innerHTML = '';
+    if (!sessions.length) {
+      tbody.innerHTML = '<tr><td colspan="5" style="color:var(--text-muted);font-style:italic">No sessions yet</td></tr>';
+      return;
+    }
+    sessions.forEach(s => {
+      const tr = document.createElement('tr');
+      const notesPreview = '—'; // loaded separately
+      tr.innerHTML = `
+        <td data-username="${escHtml((s.username || '').toLowerCase())}">
+          <span style="font-weight:600">${escHtml(s.username || '?')}</span>
+        </td>
+        <td>${escHtml(s.name)}</td>
+        <td style="font-size:12px">${formatDate(s.startTime)}</td>
+        <td style="font-size:12px">${s.duration ? formatDuration(s.duration) : (s.endTime ? '—' : '<span style="color:#56A67A;font-weight:600">active</span>')}</td>
+        <td>
+          <button class="admin-action-btn" data-action="view-notes" data-sid="${s.id}" data-sname="${escHtml(s.name)}">View Notes</button>
+        </td>
+      `;
+      tbody.appendChild(tr);
+    });
+  } catch (err) {
+    tbody.innerHTML = `<tr><td colspan="5" style="color:#A03A3A">${escHtml(err.message)}</td></tr>`;
+  }
+}
+
+$('admin-sessions-tbody').addEventListener('click', async e => {
+  const btn = e.target.closest('[data-action="view-notes"]');
+  if (!btn) return;
+  const sid   = parseInt(btn.dataset.sid, 10);
+  const sname = btn.dataset.sname;
+  try {
+    const note = await api('GET', '/sessions/' + sid + '/notes');
+    alert(`Notes for "${sname}":\n\n${note.content || '(no notes recorded)'}`);
+  } catch (err) {
+    alert('Error: ' + err.message);
+  }
+});
+
+// ─ Notes tab ─
+async function loadAdminNotes() {
+  const list = $('admin-notes-list');
+  list.innerHTML = '<span class="tattva-empty">Loading…</span>';
+  try {
+    const grouped = await api('GET', '/admin/sessions/by-user');
+    list.innerHTML = '';
+    const entries = [];
+    for (const [username, sessions] of Object.entries(grouped)) {
+      for (const s of sessions) {
+        entries.push({ username, session: s });
+      }
+    }
+    if (!entries.length) {
+      list.innerHTML = '<span class="tattva-empty">No sessions yet</span>';
+      return;
+    }
+    // Load notes for all sessions
+    for (const { username, session: s } of entries) {
+      let noteContent = '';
+      try {
+        const note = await api('GET', '/sessions/' + s.id + '/notes');
+        noteContent = note.content || '';
+      } catch { /* ignore */ }
+
+      const item = document.createElement('div');
+      item.className = 'admin-note-item';
+      item.innerHTML = `
+        <div class="admin-note-header">
+          <span class="admin-note-user">${escHtml(username)}</span>
+          <span class="admin-note-session">${escHtml(s.name)}</span>
+          <span class="admin-note-date">${formatDate(s.startTime)}</span>
+        </div>
+        ${noteContent
+          ? `<div class="admin-note-content">${escHtml(noteContent)}</div>`
+          : `<div class="admin-note-empty">no notes recorded</div>`
+        }
+      `;
+      list.appendChild(item);
+    }
+  } catch (err) {
+    list.innerHTML = `<span class="tattva-empty" style="color:#A03A3A">${escHtml(err.message)}</span>`;
+  }
+}
 
 // ── Canvas / Waveform ─────────────────────────────────────────────────────────
 function resizeCanvas() {
-  const dpr  = window.devicePixelRatio || 1;
-  const rect = canvas.parentElement.getBoundingClientRect();
+  const canvas = $('eeg-canvas');
+  const ctx    = canvas.getContext('2d');
+  const dpr    = window.devicePixelRatio || 1;
+  const rect   = canvas.parentElement.getBoundingClientRect();
   canvas.width  = rect.width  * dpr;
   canvas.height = 110 * dpr;
   ctx.setTransform(1, 0, 0, 1, 0, 0);
@@ -81,6 +588,9 @@ function resizeCanvas() {
 }
 
 function drawWave() {
+  const canvas = $('eeg-canvas');
+  if (!canvas) return;
+  const ctx = canvas.getContext('2d');
   const w = canvas.clientWidth, h = 110;
   ctx.clearRect(0, 0, w, h);
 
@@ -90,7 +600,6 @@ function drawWave() {
   ctx.fillStyle = bg;
   ctx.fillRect(0, 0, w, h);
 
-  // centre guide
   ctx.strokeStyle = '#E4E2DC';
   ctx.lineWidth = 1;
   ctx.setLineDash([4, 6]);
@@ -121,7 +630,6 @@ function drawWave() {
   }
   ctx.stroke();
 
-  // fill under
   ctx.lineTo(w, h / 2); ctx.lineTo(0, h / 2); ctx.closePath();
   const fill = ctx.createLinearGradient(0, h / 2 - h * 0.34, 0, h / 2 + h * 0.1);
   fill.addColorStop(0, 'rgba(217,119,87,0.12)');
@@ -154,7 +662,6 @@ function pushWaveFromBands(bp) {
   }
 }
 
-// idle gentle sway
 let idlePhase = 0;
 setInterval(() => {
   if (mode === 'idle') {
@@ -169,32 +676,14 @@ setInterval(() => {
 
 // ── Status pill ───────────────────────────────────────────────────────────────
 function setStatus(cls, label) {
+  const statusPill  = $('status-pill');
+  const statusLabel = $('status-label');
   statusPill.className = 'status-pill' + (cls ? ' ' + cls : '');
   statusLabel.textContent = label;
 }
 
-// ── UI Update from a reading object ──────────────────────────────────────────
-/*
-  reading = {
-    epoch, latency_ms, data_quality,
-    chitta_bhumi: { state, depth, confidence, probabilities: {Kshipta,Vikshipta,Ekagra,Niruddha} },
-    swara: { state, confidence, note },
-    band_powers: { relative: {delta,theta,alpha,beta,gamma} },  // 0..1
-    alpha_asymmetry,
-    tattva_flags: [],
-    contemplative_depth,
-  }
-  -or- from Render backend:
-  {
-    chitta_bhumi: { state, confidence },
-    swara: { state },
-    tattva: [],
-    depth,
-    eeg_spectrum: { alpha, theta, delta, beta, gamma },  // values as %
-  }
-*/
+// ── UI Update ─────────────────────────────────────────────────────────────────
 function applyReading(r, bp) {
-  // ── Chitta Bhumi ──
   const state = r.chitta_bhumi?.state || '—';
   const depth = r.chitta_bhumi?.depth || r.depth || CHITTA_DEPTHS[state] || '—';
   const conf  = r.chitta_bhumi?.confidence || '—';
@@ -207,56 +696,47 @@ function applyReading(r, bp) {
   $('val-latency').textContent     = r.latency_ms != null ? r.latency_ms.toFixed(1) + ' ms' : '— ms';
   $('val-quality').textContent     = r.data_quality || '✓';
   $('val-timestamp').textContent   = r.timestamp || new Date().toISOString().slice(11,22) + ' UTC';
-  $('val-board').textContent       = r.board || (mode === 'bluetooth' ? btDevice?.name || 'BLE device' : '—');
+  $('val-board').textContent       = r.board || (mode === 'bluetooth' ? (btDevice?.name || 'BLE device') : '—');
   $('val-mode').textContent        = mode === 'demo' ? 'synthetic demo' : mode === 'bluetooth' ? 'BLE → Render' : 'SSE / polling';
 
-  // card state class
   const card = $('chitta-card');
   card.className = 'card chitta-card' + (state !== '—' ? ' state-' + state : '');
-
-  // depth fill
   $('chitta-fill').style.width = (DEPTH_PCT[depth] || 0) + '%';
 
-  // node highlights
   document.querySelectorAll('.chitta-depth-nodes span').forEach(el => {
     el.classList.toggle('active', el.dataset.s === state);
   });
 
-  // probabilities
   ['Kshipta', 'Vikshipta', 'Ekagra', 'Niruddha'].forEach(s => {
     const raw = probs[s];
     const pct = raw ? parseFloat(raw) : 0;
-    $('prob-' + s).style.width   = pct + '%';
+    $('prob-' + s).style.width    = pct + '%';
     $('probval-' + s).textContent = raw || '—';
   });
 
-  // depth pill
   const pill = $('depth-pill');
   pill.textContent = depth || '—';
   pill.className = 'depth-pill' + (depth ? ' ' + depth : '');
 
-  // ── Band powers ──
   let bands = null;
   if (bp) {
     bands = bp;
   } else if (r.band_powers?.relative) {
     bands = r.band_powers.relative;
   } else if (r.eeg_spectrum) {
-    // backend returns percentages — normalize to 0..1
-    const sp = r.eeg_spectrum;
+    const sp  = r.eeg_spectrum;
     const tot = (sp.delta||0)+(sp.theta||0)+(sp.alpha||0)+(sp.beta||0)+(sp.gamma||0) || 1;
     bands = { delta: sp.delta/tot, theta: sp.theta/tot, alpha: sp.alpha/tot, beta: sp.beta/tot, gamma: sp.gamma/tot };
   }
   if (bands) {
     ['delta','theta','alpha','beta','gamma'].forEach(k => {
       const v = bands[k] || 0;
-      $('band-' + k).style.height    = Math.round(v * 100) + '%';
-      $('bandval-' + k).textContent  = (v * 100).toFixed(1) + '%';
+      $('band-' + k).style.height   = Math.round(v * 100) + '%';
+      $('bandval-' + k).textContent = (v * 100).toFixed(1) + '%';
     });
     pushWaveFromBands(bands);
   }
 
-  // ── Swara ──
   const swaraState = r.swara?.state || '—';
   const swaraConf  = r.swara?.confidence || '—';
   const swaraNote  = r.swara?.note || '';
@@ -273,28 +753,27 @@ function applyReading(r, bp) {
   $('glyph-sushumna').className = 'swara-glyph' + (isSushumna ? ' active-sushumna' : '');
   $('glyph-pingala').className  = 'swara-glyph' + (isPingala  ? ' active-pingala'  : '');
 
-  const asym   = r.alpha_asymmetry || 0;
+  const asym    = r.alpha_asymmetry || 0;
   const clamped = Math.max(-0.5, Math.min(0.5, asym));
-  const pct    = (clamped / 0.5) * 50;
+  const pct     = (clamped / 0.5) * 50;
   const thumbL  = (50 + pct) + '%';
   const fillBg  = isIda ? 'var(--ida)' : isPingala ? 'var(--pingala)' : 'var(--sushumna)';
   const thumb   = $('asym-thumb');
-  const fill    = $('asym-fill');
+  const fillEl  = $('asym-fill');
   thumb.style.left       = thumbL;
   thumb.style.background = fillBg;
   if (pct > 0) {
-    fill.style.left       = '50%';
-    fill.style.right      = (100 - (50 + pct)) + '%';
-    fill.style.background = fillBg;
+    fillEl.style.left       = '50%';
+    fillEl.style.right      = (100 - (50 + pct)) + '%';
+    fillEl.style.background = fillBg;
   } else if (pct < 0) {
-    fill.style.left       = (50 + pct) + '%';
-    fill.style.right      = '50%';
-    fill.style.background = fillBg;
+    fillEl.style.left       = (50 + pct) + '%';
+    fillEl.style.right      = '50%';
+    fillEl.style.background = fillBg;
   } else {
-    fill.style.left = fill.style.right = '50%';
+    fillEl.style.left = fillEl.style.right = '50%';
   }
 
-  // ── Tattva flags ──
   const flags    = r.tattva_flags || r.tattva || [];
   const flagsDiv = $('tattva-flags');
   flagsDiv.innerHTML = '';
@@ -304,7 +783,7 @@ function applyReading(r, bp) {
     flags.forEach(f => {
       const span = document.createElement('span');
       let cls = 'tattva-other';
-      if (/tattva/i.test(f))     cls = 'tattva-activation';
+      if (/tattva/i.test(f))       cls = 'tattva-activation';
       else if (/pratyahara/i.test(f)) cls = 'pratyahara';
       else if (/turiya/i.test(f))     cls = 'turiya';
       else if (/gamma/i.test(f))      cls = 'gamma-spike';
@@ -315,7 +794,7 @@ function applyReading(r, bp) {
   }
 }
 
-// ── Local FFT + classification (fallback when no backend) ─────────────────────
+// ── Local FFT + classification ────────────────────────────────────────────────
 function fft(signal) {
   let size = 1;
   while (size < signal.length) size <<= 1;
@@ -371,15 +850,14 @@ function classifyLocal(bp) {
     bp.alpha*3.5 + bp.theta*1.0 - bp.beta*2.0,
     bp.theta*3.0 + bp.delta*2.0 - bp.beta*2.5,
   ];
-  const probs = softmax(logits);
-  const maxI  = probs.indexOf(Math.max(...probs));
-  const state = states[maxI];
+  const probs  = softmax(logits);
+  const maxI   = probs.indexOf(Math.max(...probs));
+  const state  = states[maxI];
   const probMap = {};
   states.forEach((s,i) => { probMap[s] = (probs[i]*100).toFixed(1)+'%'; });
 
-  const abs  = Math.abs(bp.alpha); // proxy for asymmetry
-  const asym = (Math.random()-0.5) * 0.3;
-  const isIda = asym < -0.04, isPingala = asym > 0.04;
+  const asym   = (Math.random()-0.5) * 0.3;
+  const isIda  = asym < -0.04, isPingala = asym > 0.04;
   const swaraState = isIda ? 'Ida Nadi — right hemisphere dominant'
                    : isPingala ? 'Pingala Nadi — left hemisphere dominant'
                    : 'Sushumna — both nadis balanced';
@@ -419,51 +897,44 @@ const DEMO_BANDS = {
   Niruddha:  { delta:0.08, theta:0.35, alpha:0.38, beta:0.12, gamma:0.07 },
 };
 const SWARA_NOTES_MAP = {
-  'Ida Nadi — right hemisphere dominant':      SWARA_NOTES.ida,
-  'Pingala Nadi — left hemisphere dominant':   SWARA_NOTES.pingala,
-  'Sushumna — both nadis balanced':            SWARA_NOTES.sushumna,
+  'Ida Nadi — right hemisphere dominant':    SWARA_NOTES.ida,
+  'Pingala Nadi — left hemisphere dominant': SWARA_NOTES.pingala,
+  'Sushumna — both nadis balanced':          SWARA_NOTES.sushumna,
 };
 
 function makeDemoReading() {
   demoEpoch++;
-  if (demoEpoch % 8 === 0) demoStateIdx = (demoStateIdx+1) % DEMO_STATES.length;
-  if (demoEpoch % 5 === 0) demoSwaraIdx = (demoSwaraIdx+1) % DEMO_SWARA.length;
+  const jitter = (v, range) => v + (Math.random()-0.5)*range;
+  const state  = DEMO_STATES[demoStateIdx % DEMO_STATES.length];
+  const base   = DEMO_BANDS[state];
+  const bp     = {
+    delta: jitter(base.delta, 0.04), theta: jitter(base.theta, 0.05),
+    alpha: jitter(base.alpha, 0.06), beta:  jitter(base.beta,  0.05),
+    gamma: jitter(base.gamma, 0.03),
+  };
+  const tot = Object.values(bp).reduce((a,b)=>a+b,0);
+  Object.keys(bp).forEach(k => bp[k] = Math.max(0.01, bp[k]/tot));
 
-  const state = DEMO_STATES[demoStateIdx];
-  const swara = DEMO_SWARA[demoSwaraIdx];
-  const base  = DEMO_BANDS[state];
+  const depth  = CHITTA_DEPTHS[state];
+  const conf   = (70 + Math.random()*20).toFixed(1) + '%';
+  const probs  = {};
+  DEMO_STATES.forEach(s => { probs[s] = s===state ? conf : (Math.random()*15).toFixed(1)+'%'; });
 
-  const jit = v => Math.max(0.01, v + (Math.random()-0.5)*0.06);
-  let d=jit(base.delta),t=jit(base.theta),a=jit(base.alpha),b=jit(base.beta),g=jit(base.gamma);
-  const tot = d+t+a+b+g;
-  d/=tot; t/=tot; a/=tot; b/=tot; g/=tot;
-  const bp = { delta:d, theta:t, alpha:a, beta:b, gamma:g };
-
-  const logits = [
-    b*3.0+g*1.5-a*1.5,
-    a*1.5+b*1.5-t*0.5,
-    a*3.5+t*1.0-b*2.0,
-    t*3.0+d*2.0-b*2.5,
-  ];
-  const probs  = softmax(logits);
-  const probMap = {};
-  DEMO_STATES.forEach((s,i)=>{ probMap[s]=(probs[i]*100).toFixed(1)+'%'; });
-
-  const isIda = /ida/i.test(swara), isPingala = /pingala/i.test(swara);
-  const asym  = isIda ? -(0.05+Math.random()*0.15) : isPingala ? (0.05+Math.random()*0.15) : 0;
-  const depth = CHITTA_DEPTHS[state];
+  const swaraState = DEMO_SWARA[demoSwaraIdx % DEMO_SWARA.length];
+  const asym = swaraState.includes('Ida') ? -0.22 : swaraState.includes('Pingala') ? 0.22 : 0.01;
 
   const tattva = [];
-  if (a>0.35 && t<0.25) tattva.push('Pratyahara Window');
-  if (t>0.28 && a>0.28) tattva.push('Potential Tattva Activation');
+  if (bp.alpha > 0.35) tattva.push('Pratyahara Window');
+  if (bp.theta > 0.30) tattva.push('Potential Tattva Activation');
 
-  epoch = demoEpoch;
+  if (demoEpoch % 8 === 0) demoStateIdx++;
+  if (demoEpoch % 5 === 0) demoSwaraIdx++;
+
   return {
-    timestamp: new Date().toISOString().slice(11,22)+' UTC',
-    epoch, latency_ms: 30+Math.random()*40,
-    data_quality: demoEpoch>3 ? '✓ clean' : '⚠ buffer filling',
-    chitta_bhumi: { state, depth, confidence: probMap[state], probabilities: probMap },
-    swara: { state: swara, confidence: 'Moderate', note: SWARA_NOTES_MAP[swara] },
+    epoch: demoEpoch, latency_ms: 15 + Math.random()*5,
+    data_quality: '✓ synthetic', board: 'SimEEG-v2',
+    chitta_bhumi: { state, depth, confidence: conf, probabilities: probs },
+    swara: { state: swaraState, confidence: 'High', note: SWARA_NOTES_MAP[swaraState] || '' },
     band_powers: { relative: bp },
     alpha_asymmetry: asym,
     tattva_flags: tattva,
@@ -471,244 +942,102 @@ function makeDemoReading() {
   };
 }
 
-async function sendDemoToBackend(bp) {
-  if (!backendUrl) return null;
-  try {
-    const res = await fetch(backendUrl.replace(/\/$/, '') + '/analyze/bands', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(bp),
-      signal: AbortSignal.timeout(10000),
-    });
-    if (!res.ok) throw new Error('HTTP ' + res.status);
-    return await res.json();
-  } catch (err) {
-    if (err instanceof TypeError) showCorsWarning();
-    return null;
-  }
-}
-
-function showCorsWarning() {
-  // Only show once per session
-  if (showCorsWarning._shown) return;
-  showCorsWarning._shown = true;
-  $('val-quality').textContent = '⚠ CORS blocked — see console';
-  console.warn(
-    '%c[controlhub] CORS error\n' +
-    'Your Render backend is blocking requests from this origin.\n' +
-    'Add this to your Flask/FastAPI backend:\n\n' +
-    '  from flask_cors import CORS\n' +
-    '  CORS(app, origins=["https://eeg-pi.vercel.app", "http://localhost"])\n\n' +
-    'or in FastAPI:\n' +
-    '  app.add_middleware(CORSMiddleware,\n' +
-    '    allow_origins=["https://eeg-pi.vercel.app"],\n' +
-    '    allow_methods=["*"], allow_headers=["*"])',
-    'color:#D97757;font-size:13px'
-  );
-}
-
-function mergeBackendResponse(r, data) {
-  const t0stamp = new Date().toISOString().slice(11,22)+' UTC';
-  return {
-    ...r,
-    data_quality: '\u2713 demo \u2192 Render',
-    chitta_bhumi: {
-      state:         data.chitta_bhumi?.state        || r.chitta_bhumi.state,
-      depth:         data.chitta_bhumi?.depth        || data.depth || r.chitta_bhumi.depth,
-      confidence:    data.chitta_bhumi?.confidence   || r.chitta_bhumi.confidence,
-      probabilities: data.chitta_bhumi?.probabilities || r.chitta_bhumi.probabilities,
-    },
-    swara:              { state: data.swara?.state || r.swara.state, confidence: r.swara.confidence, note: r.swara.note },
-    tattva_flags:       data.tattva        || r.tattva_flags,
-    contemplative_depth:data.depth         || r.contemplative_depth,
-    eeg_spectrum:       data.eeg_spectrum  || null,
-  };
-}
-
 function startDemo() {
   stopAll();
-  showCorsWarning._shown = false;
   mode = 'demo';
-  demoStateIdx = demoSwaraIdx = demoEpoch = 0;
   setStatus('demo', 'demo mode');
-  btnDemo.classList.add('active');
-  demoIcon.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
-  $('val-mode').textContent = backendUrl ? 'demo \u2192 Render' : 'synthetic demo';
-
-  const tick = () => {
+  const demoIconEl = $('demo-icon');
+  $('btn-demo').classList.add('active');
+  demoIconEl.innerHTML = '<rect x="6" y="4" width="4" height="16"/><rect x="14" y="4" width="4" height="16"/>';
+  demoTimer = setInterval(() => {
     const r = makeDemoReading();
-    // ── Show local data immediately — never block ──
-    applyReading(r);
-    // ── Then enhance with backend response in the background ──
-    if (backendUrl) {
-      const t0 = performance.now();
-      sendDemoToBackend(r.band_powers.relative).then(data => {
-        if (data && mode === 'demo') {
-          applyReading({ ...mergeBackendResponse(r, data), latency_ms: parseFloat((performance.now()-t0).toFixed(1)) });
-        }
-      });
-    }
-  };
-
-  tick();
-  demoTimer = setInterval(tick, DEMO_INTERVAL);
+    applyReading(r, r.band_powers.relative);
+  }, DEMO_INTERVAL);
 }
 
 function stopDemo() {
   clearInterval(demoTimer); demoTimer = null;
   mode = 'idle';
   setStatus('', 'disconnected');
-  btnDemo.classList.remove('active');
-  demoIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
+  $('btn-demo').classList.remove('active');
+  $('demo-icon').innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
 }
 
 // ── Bluetooth ─────────────────────────────────────────────────────────────────
 async function connectBluetooth() {
   if (!navigator.bluetooth) {
-    alert('Web Bluetooth is not supported. Use Chrome or Edge over HTTPS or localhost.');
+    alert('Web Bluetooth is not supported. Use Chrome or Edge.');
     return;
   }
   try {
-    stopAll();
-    setStatus('bluetooth', 'scanning…');
-    btnBt.classList.add('bt-active');
-
-    btDevice = await navigator.bluetooth.requestDevice({
-      acceptAllDevices: true,
-      optionalServices: [MUSE_SERVICE_UUID, 'battery_service', 'device_information'],
+    const device = await navigator.bluetooth.requestDevice({
+      filters: [{ services: [MUSE_SERVICE_UUID] }],
+      optionalServices: [MUSE_SERVICE_UUID],
     });
+    btDevice = device;
+    device.addEventListener('gattserverdisconnected', onBtDisconnected);
 
-    const server = await btDevice.gatt.connect();
-    setStatus('bluetooth', 'BLE — ' + (btDevice.name || 'device'));
-    $('val-board').textContent = btDevice.name || 'BLE device';
+    const server  = await device.gatt.connect();
+    const service = await server.getPrimaryService(MUSE_SERVICE_UUID);
+
+    const controlChar = await service.getCharacteristic(MUSE_CONTROL_UUID).catch(() => null);
+    if (controlChar) {
+      const enc = new TextEncoder();
+      await controlChar.writeValue(enc.encode('p21\n'));
+      await new Promise(r => setTimeout(r, 300));
+      await controlChar.writeValue(enc.encode('d\n'));
+    }
+
+    for (let c = 0; c < MUSE_EEG_UUIDS.length; c++) {
+      const char = await service.getCharacteristic(MUSE_EEG_UUIDS[c]).catch(() => null);
+      if (!char) continue;
+      await char.startNotifications();
+      const ch = c;
+      char.addEventListener('characteristicvaluechanged', ev => onMuseEEG(ev, ch));
+    }
+
+    btDisconnect = () => { if (device.gatt.connected) device.gatt.disconnect(); };
     mode = 'bluetooth';
-
-    // Show device row in settings
-    btDeviceName.textContent = btDevice.name || 'Unknown device';
-    btDeviceRow.style.display = 'flex';
-
-    // Per-channel notification handlers
-    const notifyHandlers = [];
-
-    // Try Muse-specific service
-    let isMuse = false;
-    try {
-      const svc = await server.getPrimaryService(MUSE_SERVICE_UUID);
-      isMuse = true;
-      // Send start command
-      try {
-        const ctrl = await svc.getCharacteristic(MUSE_CONTROL_UUID);
-        await ctrl.writeValue(new Uint8Array([0x02, 0x64, 0x0a])); // 'd\n' — start streaming
-      } catch { /* ignore */ }
-      // Subscribe to EEG channels
-      for (let ci = 0; ci < MUSE_EEG_UUIDS.length; ci++) {
-        try {
-          const ch = await svc.getCharacteristic(MUSE_EEG_UUIDS[ci]);
-          await ch.startNotifications();
-          const channelIdx = ci;
-          const handler = e => {
-            const dv = e.target.value;
-            if (!dv) return;
-            // Muse packet: 2-byte timestamp + 12 samples packed as 12-bit big-endian
-            for (let i = 2; i < dv.byteLength; i += 2) {
-              const raw = dv.getInt16(i, false);
-              bleChannels[channelIdx].push(raw / 32768);
-            }
-            onBleSamples(channelIdx);
-          };
-          ch.addEventListener('characteristicvaluechanged', handler);
-          notifyHandlers.push({ ch, handler });
-        } catch { /* skip */ }
-      }
-    } catch { /* not Muse */ }
-
-    // Generic BLE fallback
-    if (!isMuse) {
-      try {
-        const services = await server.getPrimaryServices();
-        for (const svc of services) {
-          try {
-            const chars = await svc.getCharacteristics();
-            for (const ch of chars) {
-              if (ch.properties.notify || ch.properties.indicate) {
-                try {
-                  await ch.startNotifications();
-                  const handler = e => {
-                    const dv = e.target.value;
-                    if (!dv) return;
-                    for (let i = 0; i+1 < dv.byteLength; i += 2) {
-                      bleChannels[0].push(dv.getInt16(i, true) / 32768);
-                    }
-                    onBleSamples(0);
-                  };
-                  ch.addEventListener('characteristicvaluechanged', handler);
-                  notifyHandlers.push({ ch, handler });
-                } catch { /* skip */ }
-              }
-            }
-          } catch { /* skip svc */ }
-        }
-      } catch { /* no services */ }
-    }
-
-    btDisconnect = () => {
-      notifyHandlers.forEach(({ ch, handler }) => {
-        try { ch.stopNotifications(); } catch { /* ignore */ }
-        ch.removeEventListener('characteristicvaluechanged', handler);
-      });
-      if (btDevice?.gatt?.connected) btDevice.gatt.disconnect();
-    };
-    btDevice.addEventListener('gattserverdisconnected', onBtDisconnected);
-
-    // If device sends nothing, keep a sim running so UI stays live
-    const simId = setInterval(() => {
-      if (mode !== 'bluetooth') { clearInterval(simId); return; }
-      blePhase += 1 / SAMPLE_RATE;
-      const s = simSample(blePhase);
-      bleChannels[0].push(s);
-      pushWave(s * 0.5);
-      bleSamTick++;
-      $('val-buffer').textContent = Math.min(bleChannels[0].length, COLLECT_N) + ' / ' + COLLECT_N;
-      if (bleChannels[0].length >= COLLECT_N) {
-        processAndPost();
-      }
-    }, 1000 / SAMPLE_RATE);
-
-    // store simId in disconnect
-    const prevDisc = btDisconnect;
-    btDisconnect = () => { clearInterval(simId); prevDisc(); };
-
+    setStatus('bluetooth', 'BLE connected');
+    $('btn-bluetooth').classList.add('bt-active');
+    $('bt-device-name').textContent = device.name || 'BLE device';
+    $('bt-device-row').style.display = '';
+    bleChannels.forEach(ch => { ch.length = 0; });
+    $('val-buffer').textContent = '0 / ' + COLLECT_N;
   } catch (err) {
-    if (!err.message?.includes('User cancelled') && !err.message?.includes('cancelled')) {
-      console.error('Bluetooth connection failed', err);
+    if (!err.message?.includes('cancelled')) {
+      console.warn('BT connect failed:', err.message);
+      setStatus('error', 'BT failed');
     }
-    stopAll();
   }
 }
 
-function onBleSamples(channelIdx) {
-  const ch = bleChannels[channelIdx];
-  if (ch.length > 0) pushWave(ch[ch.length-1] * 0.5);
-  $('val-buffer').textContent = Math.min(ch.length, COLLECT_N) + ' / ' + COLLECT_N;
-  if (ch.length >= COLLECT_N) {
-    processAndPost();
+function onMuseEEG(ev, ch) {
+  const data = ev.target.value;
+  const samples = [];
+  for (let i = 2; i < data.byteLength - 1; i += 2) {
+    samples.push(data.getInt16(i, false) * 0.48828125e-6);
   }
+  bleChannels[ch].push(...samples);
+  bleSamTick += samples.length;
+
+  const buf = Math.min(bleChannels[0].length, COLLECT_N);
+  $('val-buffer').textContent = buf + ' / ' + COLLECT_N;
+
+  if (bleChannels[0].length >= COLLECT_N) processBluetoothEEG();
 }
 
-async function processAndPost() {
-  // snapshot and clear buffers
+async function processBluetoothEEG() {
   const snapshot = bleChannels.map(ch => {
     const s = ch.slice(-COLLECT_N);
     ch.length = 0;
     return s;
-  }).filter(ch => ch.length > 0);
-  bleChannels.forEach(ch => { ch.length = 0; });
+  });
   $('val-buffer').textContent = '0 / ' + COLLECT_N;
-
+  blePhase++;
   const t0 = performance.now();
 
   if (backendUrl) {
-    // ── POST raw EEG to /analyze ──
     try {
       const res  = await fetch(backendUrl.replace(/\/$/, '') + '/analyze', {
         method: 'POST',
@@ -738,12 +1067,10 @@ async function processAndPost() {
       });
       return;
     } catch (err) {
-      if (err instanceof TypeError) showCorsWarning();
-      else console.warn('Backend /analyze failed, falling back to local FFT:', err.message);
+      console.warn('Backend /analyze failed, falling back to local FFT:', err.message);
     }
   }
 
-  // ── Local FFT fallback ──
   const signal = snapshot[0] || [];
   if (signal.length < 64) return;
   const sz   = Math.pow(2, Math.floor(Math.log2(signal.length)));
@@ -757,11 +1084,11 @@ async function processAndPost() {
 function disconnectBluetooth() {
   if (btDisconnect) { btDisconnect(); btDisconnect = null; }
   btDevice = null;
-  btDeviceRow.style.display = 'none';
+  $('bt-device-row').style.display = 'none';
   bleChannels.forEach(ch => { ch.length = 0; });
   mode = 'idle';
   setStatus('', 'disconnected');
-  btnBt.classList.remove('bt-active');
+  $('btn-bluetooth').classList.remove('bt-active');
   $('val-buffer').textContent = '0 / ' + COLLECT_N;
 }
 
@@ -770,140 +1097,120 @@ function onBtDisconnected() {
 }
 
 // ── Backend URL mode ──────────────────────────────────────────────────────────
-  // Polls /status until model_ready:true (Render free tier cold-starts ~30 s).
-  // "connected" is only shown when the backend genuinely says model_ready:true.
-  async function connectBackendUrl(url) {
-    if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = null; }
-    mode = 'backend';
-    setStatus('waking', 'waking up…');
-    $('val-board').textContent = 'Render backend';
-    $('val-mode').textContent  = 'BLE → Render';
+async function connectBackendUrl(url) {
+  if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = null; }
+  mode = 'backend';
+  setStatus('waking', 'waking up…');
+  $('val-board').textContent = 'Render backend';
+  $('val-mode').textContent  = 'BLE → Render';
 
-    let attempts = 0;
-    const MAX = 40; // 40 × 1.5 s = 60 s max cold-start wait
+  let attempts = 0;
+  const MAX = 40;
 
-    const poll = async () => {
-      attempts++;
-      try {
-        const res = await fetch(url.replace(/\/$/, '') + '/status', {
-          signal: AbortSignal.timeout(5000),
-        });
-        if (res.ok) {
-          const data = await res.json();
-          if (data.model_ready) {
-            clearInterval(backendPollTimer); backendPollTimer = null;
-            setStatus('connected', 'backend ready');
-          } else {
-            setStatus('waking', 'model loading…');
-          }
-        } else {
-          setStatus('waking', 'waking up…');
-        }
-      } catch {
-        if (attempts >= MAX) {
+  const poll = async () => {
+    attempts++;
+    try {
+      const res = await fetch(url.replace(/\/$/, '') + '/status', {
+        signal: AbortSignal.timeout(5000),
+      });
+      if (res.ok) {
+        const data = await res.json();
+        if (data.model_ready) {
           clearInterval(backendPollTimer); backendPollTimer = null;
-          setStatus('error', 'backend offline');
+          setStatus('connected', 'backend ready');
+        } else {
+          setStatus('waking', 'model loading…');
         }
+      } else {
+        setStatus('waking', 'waking up…');
       }
-    };
+    } catch {
+      if (attempts >= MAX) {
+        clearInterval(backendPollTimer); backendPollTimer = null;
+        setStatus('error', 'backend offline');
+      }
+    }
+  };
 
-    await poll();
-    if (backendPollTimer === null && mode === 'backend') return; // already resolved
-    backendPollTimer = setInterval(poll, 1500);
-  }
+  await poll();
+  if (backendPollTimer === null && mode === 'backend') return;
+  backendPollTimer = setInterval(poll, 1500);
+}
 
 // ── Stop everything ───────────────────────────────────────────────────────────
 function stopAll() {
-  clearInterval(demoTimer);  demoTimer = null;
-  clearInterval(pollTimer);  pollTimer = null;
+  clearInterval(demoTimer);        demoTimer = null;
+  clearInterval(pollTimer);        pollTimer = null;
   clearInterval(backendPollTimer); backendPollTimer = null;
   if (sseSource) { sseSource.close(); sseSource = null; }
   if (mode === 'bluetooth') disconnectBluetooth();
   mode = 'idle';
   setStatus('', 'disconnected');
-  btnDemo.classList.remove('active');
-  btnBt.classList.remove('bt-active');
-  demoIcon.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
-}
-
-// ── Simulated EEG sample ──────────────────────────────────────────────────────
-function simSample(t) {
-  return (
-    0.30 * Math.sin(t * 2*Math.PI * 2.0) +
-    0.25 * Math.sin(t * 2*Math.PI * 6.0  + 1.1) +
-    0.45 * Math.sin(t * 2*Math.PI * 10.0 + 2.3) +
-    0.20 * Math.sin(t * 2*Math.PI * 20.0 + 0.7) +
-    0.08 * Math.sin(t * 2*Math.PI * 38.0 + 1.8) +
-    (Math.random()-0.5) * 0.15
-  );
+  const btnDemo = $('btn-demo');
+  if (btnDemo) btnDemo.classList.remove('active');
+  const demoIconEl = $('demo-icon');
+  if (demoIconEl) demoIconEl.innerHTML = '<polygon points="5 3 19 12 5 21 5 3"/>';
 }
 
 // ── Settings panel ────────────────────────────────────────────────────────────
-btnSettings.addEventListener('click', () => {
-  settingsOverlay.classList.toggle('open');
+$('btn-settings').addEventListener('click', () => {
+  $('settings-overlay').classList.toggle('open');
 });
 $('btn-close-settings').addEventListener('click', () => {
-  settingsOverlay.classList.remove('open');
+  $('settings-overlay').classList.remove('open');
 });
-settingsOverlay.addEventListener('click', e => {
-  if (e.target === settingsOverlay) settingsOverlay.classList.remove('open');
+$('settings-overlay').addEventListener('click', e => {
+  if (e.target === $('settings-overlay')) $('settings-overlay').classList.remove('open');
 });
 
-// load saved URL
-if (backendUrl) inputUrl.value = backendUrl;
+if (backendUrl) $('input-backend-url').value = backendUrl;
 
 $('btn-test').addEventListener('click', async () => {
-  const url = inputUrl.value.trim().replace(/\/$/, '');
+  const url    = $('input-backend-url').value.trim().replace(/\/$/, '');
+  const testEl = $('test-msg');
   if (!url) { alert('Enter a URL first.'); return; }
-  testMsg.style.display = '';
-  testMsg.style.color = 'var(--text-muted)';
-  testMsg.textContent = 'Testing…';
+  testEl.style.display = '';
+  testEl.style.color   = 'var(--text-muted)';
+  testEl.textContent   = 'Testing…';
   try {
     const res  = await fetch(url + '/status', { signal: AbortSignal.timeout(5000) });
     const data = await res.json();
-    testMsg.style.color = '#56A67A';
-    testMsg.textContent = '✓ Connected — board: ' + (data.board || 'unknown');
+    testEl.style.color = '#56A67A';
+    testEl.textContent = '✓ Connected — board: ' + (data.board || 'unknown');
   } catch (e) {
-    testMsg.style.color = '#C75C5C';
-    testMsg.textContent = '✗ ' + (e.message || 'connection failed');
+    testEl.style.color = '#C75C5C';
+    testEl.textContent = '✗ ' + (e.message || 'connection failed');
   }
 });
 
 $('btn-save').addEventListener('click', () => {
-  const url = inputUrl.value.trim().replace(/\/$/, '');
+  const url = $('input-backend-url').value.trim().replace(/\/$/, '');
   if (!url) { alert('Enter a URL first.'); return; }
   backendUrl = url;
   localStorage.setItem('controlhub_url', url);
-  settingsOverlay.classList.remove('open');
+  $('settings-overlay').classList.remove('open');
   connectBackendUrl(url);
 });
 
-// ── Bluetooth panel button ────────────────────────────────────────────────────
+// ── Bluetooth panel ───────────────────────────────────────────────────────────
 $('btn-bt-scan').addEventListener('click', async () => {
-  settingsOverlay.classList.remove('open');
+  $('settings-overlay').classList.remove('open');
   await connectBluetooth();
 });
 $('btn-bt-disconnect').addEventListener('click', disconnectBluetooth);
 
-// ── Header buttons ────────────────────────────────────────────────────────────
-btnBt.addEventListener('click', async () => {
+$('btn-bluetooth').addEventListener('click', async () => {
   if (mode === 'bluetooth') disconnectBluetooth();
   else await connectBluetooth();
 });
 
-btnDemo.addEventListener('click', () => {
+$('btn-demo').addEventListener('click', () => {
   if (mode === 'demo') stopDemo();
   else startDemo();
 });
 
 // ── Init ──────────────────────────────────────────────────────────────────────
-window.addEventListener('resize', () => { resizeCanvas(); });
-resizeCanvas();
-requestAnimationFrame(drawWave);
-$('val-buffer').textContent = '0 / ' + COLLECT_N;
+window.addEventListener('resize', resizeCanvas);
 
-// Auto-connect to backend on load
-if (backendUrl) {
-  inputUrl.value = backendUrl;
-  connectBackendUrl(backendUrl);
-}
+// Start by checking auth — show login or main app accordingly
+checkAuth();
