@@ -3,25 +3,185 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EEG DEV TESTING — testing</title>
+  <title>EEG DEV TESTING — From Brainwaves to Bliss</title>
   <link rel="stylesheet" href="./style.css" />
 </head>
 <body>
 
+<!-- ═══ LOGIN SCREEN ═════════════════════════════════════════════════════════ -->
+<div class="login-screen" id="login-screen">
+  <div class="login-card">
+    <div class="login-brand">
+      <!-- Meditating person icon -->
+      <div class="login-brand-icon">
+        <svg viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <!-- Head -->
+          <circle cx="30" cy="10" r="6" stroke="currentColor" stroke-width="2"/>
+          <!-- Body torso in meditation pose -->
+          <path d="M30 16 C30 16 30 22 30 26" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <!-- Left arm -->
+          <path d="M30 22 C26 24 18 28 14 30" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <!-- Right arm -->
+          <path d="M30 22 C34 24 42 28 46 30" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <!-- Left leg crossed -->
+          <path d="M30 26 C26 30 20 34 14 34" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <!-- Right leg crossed -->
+          <path d="M30 26 C34 30 40 34 46 34" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <!-- Base / lotus seat -->
+          <ellipse cx="30" cy="36" rx="16" ry="3" stroke="currentColor" stroke-width="1.5" opacity="0.4"/>
+          <!-- Aura circles -->
+          <circle cx="30" cy="20" r="24" stroke="currentColor" stroke-width="1" opacity="0.12"/>
+          <circle cx="30" cy="20" r="18" stroke="currentColor" stroke-width="1" opacity="0.18"/>
+        </svg>
+      </div>
+      <div class="login-brand-text">
+        <span class="login-brand-name">EEG DEV TESTING</span>
+        <span class="login-brand-sub">from brainwaves to bliss</span>
+      </div>
+    </div>
+
+    <div class="login-form-section">
+      <div class="login-title">Sign In</div>
+      <div class="login-error" id="login-error" style="display:none"></div>
+      <form id="login-form">
+        <div class="login-field">
+          <label class="field-label">Username</label>
+          <input class="field-input" type="text" id="login-username" autocomplete="username" placeholder="enter username" required />
+        </div>
+        <div class="login-field">
+          <label class="field-label">Password</label>
+          <input class="field-input" type="password" id="login-password" autocomplete="current-password" placeholder="enter password" required />
+        </div>
+        <button class="btn-primary login-btn" type="submit" id="login-submit-btn">Sign In</button>
+      </form>
+    </div>
+  </div>
+</div>
+
+<!-- ═══ ADMIN DASHBOARD ══════════════════════════════════════════════════════ -->
+<div class="admin-overlay" id="admin-overlay" style="display:none">
+  <div class="admin-panel">
+    <div class="admin-header">
+      <span class="admin-header-title">Admin Dashboard</span>
+      <button class="icon-btn" id="btn-close-admin" title="Close admin panel">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+          <line x1="18" y1="6" x2="6" y2="18"/><line x1="6" y1="6" x2="18" y2="18"/>
+        </svg>
+      </button>
+    </div>
+
+    <div class="admin-tabs">
+      <button class="admin-tab active" data-tab="users">Users</button>
+      <button class="admin-tab" data-tab="sessions">Sessions</button>
+      <button class="admin-tab" data-tab="notes">Notes</button>
+    </div>
+
+    <!-- USERS TAB -->
+    <div class="admin-tab-content active" id="admin-tab-users">
+      <div class="admin-section-header">
+        <span class="card-tag" style="margin-bottom:0">User Accounts</span>
+        <button class="btn-primary" id="btn-add-user" style="padding:6px 14px;font-size:12px">+ Add User</button>
+      </div>
+
+      <!-- Add user form (hidden by default) -->
+      <div class="admin-add-user-form" id="admin-add-user-form" style="display:none">
+        <div class="admin-form-row">
+          <input class="field-input" type="text" id="new-username" placeholder="username" />
+          <input class="field-input" type="password" id="new-password" placeholder="password" />
+          <select class="field-input" id="new-role" style="width:auto">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button class="btn-primary" id="btn-create-user" style="white-space:nowrap;padding:8px 14px;font-size:13px">Create</button>
+          <button class="btn-secondary" id="btn-cancel-add-user" style="padding:8px 14px;font-size:13px">Cancel</button>
+        </div>
+        <div class="admin-msg" id="add-user-msg"></div>
+      </div>
+
+      <div class="admin-table-wrap">
+        <table class="admin-table" id="users-table">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Role</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="users-tbody"></tbody>
+        </table>
+      </div>
+
+      <!-- Reset password modal -->
+      <div class="admin-inline-modal" id="reset-pwd-modal" style="display:none">
+        <div class="admin-inline-modal-inner">
+          <span class="admin-inline-modal-title">Reset Password</span>
+          <input class="field-input" type="password" id="reset-pwd-input" placeholder="new password" />
+          <div class="admin-modal-actions">
+            <button class="btn-primary" id="btn-confirm-reset-pwd" style="padding:7px 14px;font-size:13px">Save</button>
+            <button class="btn-secondary" id="btn-cancel-reset-pwd" style="padding:7px 14px;font-size:13px">Cancel</button>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- SESSIONS TAB -->
+    <div class="admin-tab-content" id="admin-tab-sessions" style="display:none">
+      <div class="admin-section-header">
+        <span class="card-tag" style="margin-bottom:0">All Sessions</span>
+        <div class="admin-search-wrap">
+          <input class="field-input" type="text" id="admin-session-search" placeholder="filter by username…" style="width:180px;padding:6px 10px;font-size:12px" />
+        </div>
+      </div>
+      <div class="admin-table-wrap">
+        <table class="admin-table" id="admin-sessions-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Session Name</th>
+              <th>Start</th>
+              <th>Duration</th>
+              <th>Notes</th>
+            </tr>
+          </thead>
+          <tbody id="admin-sessions-tbody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- NOTES TAB -->
+    <div class="admin-tab-content" id="admin-tab-notes" style="display:none">
+      <div class="admin-section-header">
+        <span class="card-tag" style="margin-bottom:0">Session Notes (All Users)</span>
+      </div>
+      <div class="admin-notes-list" id="admin-notes-list">
+        <span class="tattva-empty">Loading…</span>
+      </div>
+    </div>
+  </div>
+</div>
+
 <!-- ═══ HEADER ══════════════════════════════════════════════════════════════ -->
-<header class="header">
+<header class="header" id="main-header" style="display:none">
   <div class="header-inner">
     <div class="brand">
       <div class="brand-icon">
-        <svg viewBox="0 0 40 40" fill="none" xmlns="http://www.w3.org/2000/svg">
-          <circle cx="20" cy="20" r="17" stroke="currentColor" stroke-width="2"/>
-          <circle cx="20" cy="20" r="9"  stroke="currentColor" stroke-width="1.5" opacity="0.5"/>
-          <circle cx="20" cy="20" r="3"  fill="currentColor"/>
+        <!-- Meditating person icon (matches login) -->
+        <svg viewBox="0 0 60 60" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="30" cy="10" r="6" stroke="currentColor" stroke-width="2"/>
+          <path d="M30 16 C30 16 30 22 30 26" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M30 22 C26 24 18 28 14 30" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M30 22 C34 24 42 28 46 30" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M30 26 C26 30 20 34 14 34" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <path d="M30 26 C34 30 40 34 46 34" stroke="currentColor" stroke-width="2" stroke-linecap="round"/>
+          <ellipse cx="30" cy="36" rx="16" ry="3" stroke="currentColor" stroke-width="1.5" opacity="0.4"/>
+          <circle cx="30" cy="20" r="24" stroke="currentColor" stroke-width="1" opacity="0.12"/>
+          <circle cx="30" cy="20" r="18" stroke="currentColor" stroke-width="1" opacity="0.18"/>
         </svg>
       </div>
       <div class="brand-text">
         <span class="brand-name">EEG DEV TESTING</span>
-        <span class="brand-sub">a teaching instrument</span>
+        <span class="brand-sub">from brainwaves to bliss</span>
       </div>
     </div>
     <div class="header-right">
@@ -48,6 +208,24 @@
           <polygon points="5 3 19 12 5 21 5 3"/>
         </svg>
       </button>
+      <!-- User menu -->
+      <div class="user-menu-wrap">
+        <button class="user-menu-btn" id="btn-user-menu" title="Account">
+          <span class="user-menu-avatar" id="user-avatar-initial">?</span>
+          <span class="user-menu-name" id="user-display-name">—</span>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" width="12" height="12">
+            <polyline points="6 9 12 15 18 9"/>
+          </svg>
+        </button>
+        <div class="user-menu-dropdown" id="user-menu-dropdown" style="display:none">
+          <div class="user-menu-info">
+            <span class="user-menu-role" id="user-menu-role">user</span>
+          </div>
+          <div class="user-menu-divider"></div>
+          <button class="user-menu-item admin-only" id="btn-open-admin" style="display:none">Admin Dashboard</button>
+          <button class="user-menu-item" id="btn-logout">Sign Out</button>
+        </div>
+      </div>
     </div>
   </div>
 </header>
@@ -64,8 +242,6 @@
       </button>
     </div>
     <div class="settings-body">
-
-      <!-- Bluetooth section -->
       <div class="bt-section">
         <div class="bt-section-title">Bluetooth Headband</div>
         <div id="bt-device-row" class="bt-device-row" style="display:none">
@@ -86,10 +262,7 @@
           is configured. Requires <code>Chrome</code> or <code>Edge</code>.
         </p>
       </div>
-
       <div class="divider"></div>
-
-      <!-- Backend URL section -->
       <div class="backend-section">
         <div class="backend-section-title">Render Backend URL</div>
         <label class="field-label">Backend URL</label>
@@ -104,7 +277,6 @@
           <button class="btn-secondary" id="btn-test">Test connection</button>
           <button class="btn-primary"   id="btn-save">Save &amp; connect</button>
         </div>
-
         <div class="api-contract" style="margin-top:16px">
           <p class="contract-title">Raw EEG endpoint</p>
           <pre><code>POST /analyze
@@ -132,7 +304,7 @@
 </div>
 
 <!-- ═══ MAIN ═════════════════════════════════════════════════════════════════ -->
-<main class="main">
+<main class="main" id="main-content" style="display:none">
 
   <!-- EEG canvas strip -->
   <section class="canvas-section">
@@ -154,7 +326,6 @@
 
   <!-- Top grid -->
   <div class="top-grid">
-
     <!-- Chitta Bhumi -->
     <div class="card chitta-card" id="chitta-card">
       <span class="card-tag">CHITTA BHUMI</span>
@@ -246,8 +417,7 @@
         <div class="swara-note" id="val-swara-note" style="display:none"></div>
       </div>
     </div>
-
-  </div><!-- /top-grid -->
+  </div>
 
   <!-- Band powers -->
   <div class="card band-card">
@@ -281,6 +451,50 @@
     <span class="card-tag">TATTVA / CHAKRA CORRELATES</span>
     <div class="tattva-flags" id="tattva-flags">
       <span class="tattva-empty">no flags active</span>
+    </div>
+  </div>
+
+  <!-- ═══ SESSION PANEL ══════════════════════════════════════════════════════ -->
+  <div class="session-panel card">
+    <div class="session-panel-header">
+      <span class="card-tag" style="margin-bottom:0">SESSION MANAGEMENT</span>
+      <div class="session-controls" id="session-controls">
+        <!-- When no active session -->
+        <div id="session-start-area">
+          <input class="field-input session-name-input" type="text" id="session-name-input" placeholder="session name (optional)" />
+          <button class="btn-primary session-start-btn" id="btn-start-session">Start Session</button>
+        </div>
+        <!-- When active session -->
+        <div id="session-active-area" style="display:none">
+          <div class="session-active-indicator">
+            <span class="session-active-dot"></span>
+            <span class="session-active-name" id="active-session-name">—</span>
+            <span class="session-active-timer" id="active-session-timer">0:00</span>
+          </div>
+          <button class="btn-secondary session-end-btn" id="btn-end-session">End Session</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Active session notes -->
+    <div class="session-notes-area" id="session-notes-area" style="display:none">
+      <div class="session-notes-label">
+        <span class="card-tag" style="margin-bottom:0">SESSION NOTES</span>
+        <span class="notes-save-status" id="notes-save-status"></span>
+      </div>
+      <textarea class="session-notes-input" id="session-notes-input"
+        placeholder="How are you feeling? Record your observations, emotions, or anything you'd like to note about this session…"></textarea>
+    </div>
+
+    <!-- Session history -->
+    <div class="session-history">
+      <div class="session-history-header">
+        <span class="card-tag" style="margin-bottom:0">SESSION HISTORY</span>
+        <button class="btn-secondary session-history-toggle" id="btn-toggle-history" style="padding:4px 10px;font-size:11px">Show</button>
+      </div>
+      <div class="session-history-list" id="session-history-list" style="display:none">
+        <span class="tattva-empty" id="history-empty">No sessions yet</span>
+      </div>
     </div>
   </div>
 
