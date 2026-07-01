@@ -6,30 +6,6 @@
   <title>EEG DEV TESTING</title>
   <link rel="stylesheet" href="style.css" />
   <style>
-/* ── BT Wizard Modal ─────────────────────────────────────────────────── */
-.bt-wizard-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:900}
-.bt-wizard-panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;width:440px;max-width:95vw;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.35)}
-.bt-wizard-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
-.bt-wizard-title{font-size:16px;font-weight:600;margin:0;color:var(--text)}
-.bt-wizard-body{padding:32px 24px;min-height:200px;display:flex;flex-direction:column;align-items:center;text-align:center}
-.btwiz-phase{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%}
-.btwiz-icon{font-size:48px;line-height:1}
-.btwiz-icon-pulse{animation:btwiz-pulse 1.6s ease-in-out infinite}
-@keyframes btwiz-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.12);opacity:.7}}
-.btwiz-heading{font-size:18px;font-weight:600;color:var(--text);margin:0}
-.btwiz-desc{font-size:13px;color:var(--text-muted);line-height:1.5;margin:0;max-width:320px}
-.btwiz-spinner{width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:btwiz-spin .8s linear infinite}
-@keyframes btwiz-spin{to{transform:rotate(360deg)}}
-.btwiz-quality-bar-bg{width:100%;max-width:280px;height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:4px}
-.btwiz-quality-bar{height:100%;background:var(--accent);border-radius:4px;transition:width .5s ease;width:0}
-.btwiz-quality-label{font-size:12px;color:var(--text-muted)}
-.btwiz-countdown-ring{width:80px;height:80px;border-radius:50%;border:4px solid var(--accent);display:flex;align-items:center;justify-content:center}
-.btwiz-countdown-ring span{font-size:36px;font-weight:700;color:var(--accent)}
-.btwiz-steps{display:flex;align-items:center;justify-content:center;gap:4px;padding:14px 24px;border-top:1px solid var(--border)}
-.btwiz-step{font-size:11px;color:var(--text-muted);padding:4px 12px;border-radius:20px;border:1px solid var(--border)}
-.btwiz-step[data-active="true"]{color:var(--accent);border-color:var(--accent);font-weight:600}
-.btwiz-step-line{flex:1;height:1px;background:var(--border)}
-
 /* ── Analytics Notes ─────────────────────────────────────────────────── */
 .analytics-notes-content{font-size:13px;color:var(--text);line-height:1.7;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;min-height:48px;white-space:pre-wrap;word-break:break-word}
 .analytics-notes-empty{color:var(--text-muted);font-style:italic}
@@ -473,76 +449,7 @@
 <!-- ═══════════════════════════════════════════════════════
      BLUETOOTH WIZARD MODAL
 ════════════════════════════════════════════════════════ -->
-<div id="bt-wizard-overlay" class="bt-wizard-overlay" style="display:none">
-  <div class="bt-wizard-panel">
-    <div class="bt-wizard-header">
-      <h2 class="bt-wizard-title">Connect Muse Headband</h2>
-      <button class="btn btn-ghost btn-sm" id="btn-close-bt-wizard">✕</button>
-    </div>
-    <div class="bt-wizard-body">
 
-      <!-- Phase: idle -->
-      <div id="btwiz-phase-idle" class="btwiz-phase">
-        <div class="btwiz-icon">🎧</div>
-        <h3 class="btwiz-heading">Ready to pair?</h3>
-        <p class="btwiz-desc">Put on your Muse headband and ensure Bluetooth is enabled. Press the button on the headband until the light flashes.</p>
-        <button class="btn btn-primary" id="btn-btwiz-start">Start Pairing</button>
-      </div>
-
-      <!-- Phase: pairing (browser picker open) -->
-      <div id="btwiz-phase-pairing" class="btwiz-phase" style="display:none">
-        <div class="btwiz-spinner"></div>
-        <h3 class="btwiz-heading">Searching for device…</h3>
-        <p class="btwiz-desc">Select your Muse headband from the browser's Bluetooth picker.</p>
-      </div>
-
-      <!-- Phase: waiting for signal -->
-      <div id="btwiz-phase-waiting" class="btwiz-phase" style="display:none">
-        <div class="btwiz-icon btwiz-icon-pulse">📡</div>
-        <h3 class="btwiz-heading">Waiting for EEG signal</h3>
-        <p class="btwiz-desc">Connected to <strong id="btwiz-device-name">—</strong>. Adjust the headband until signal quality improves.</p>
-        <div class="btwiz-quality-bar-bg">
-          <div class="btwiz-quality-bar" id="btwiz-quality-bar"></div>
-        </div>
-        <p class="btwiz-quality-label" id="btwiz-quality-label">Checking signal…</p>
-      </div>
-
-      <!-- Phase: countdown -->
-      <div id="btwiz-phase-countdown" class="btwiz-phase" style="display:none">
-        <div class="btwiz-countdown-ring">
-          <span id="btwiz-countdown-number">3</span>
-        </div>
-        <h3 class="btwiz-heading">Starting in…</h3>
-        <p class="btwiz-desc">Keep still. Analysis will begin automatically.</p>
-      </div>
-
-      <!-- Phase: done -->
-      <div id="btwiz-phase-done" class="btwiz-phase" style="display:none">
-        <div class="btwiz-icon">✅</div>
-        <h3 class="btwiz-heading">Live feed active</h3>
-        <p class="btwiz-desc">EEG stream connected. The dashboard is updating in real time.</p>
-        <button class="btn btn-primary" id="btn-btwiz-done">Close Wizard</button>
-      </div>
-
-      <!-- Phase: error -->
-      <div id="btwiz-phase-error" class="btwiz-phase" style="display:none">
-        <div class="btwiz-icon">⚠️</div>
-        <h3 class="btwiz-heading">Connection failed</h3>
-        <p class="btwiz-desc" id="btwiz-error-msg">Something went wrong. Please try again.</p>
-        <button class="btn btn-primary" id="btn-btwiz-retry">Try Again</button>
-      </div>
-
-    </div>
-    <!-- Step indicator -->
-    <div class="btwiz-steps">
-      <div class="btwiz-step" id="btwiz-step-1" data-active="true">1. Pair</div>
-      <div class="btwiz-step-line"></div>
-      <div class="btwiz-step" id="btwiz-step-2">2. Signal</div>
-      <div class="btwiz-step-line"></div>
-      <div class="btwiz-step" id="btwiz-step-3">3. Go</div>
-    </div>
-  </div>
-</div>
 
 <!-- ═══════════════════════════════════════════════════════
      ADMIN PAGE  (full dedicated page, replaces main content)
