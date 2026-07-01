@@ -857,3 +857,80 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); min-
     flex-direction: column;
   }
 }
+
+/* ════════════════════════════════════════════════════════════
+   BIOMETRICS ADDITIONS — append these to the end of style.css
+   ════════════════════════════════════════════════════════════ */
+
+/* ── Biometrics row (Heart Rate + Blood Oxygen) ──────────────────────────── */
+.biometrics-row {
+  display: flex;
+  gap: 12px;
+  margin-bottom: 12px;
+}
+
+.bio-card {
+  flex: 1;
+  background: var(--card-bg, #fff);
+  border: 1px solid var(--border, #E4E2DC);
+  border-radius: 10px;
+  padding: 14px 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  min-width: 0;
+}
+
+.bio-card-label {
+  font-size: 10px;
+  font-weight: 600;
+  letter-spacing: 0.08em;
+  color: var(--text-muted, #9A9690);
+  text-transform: uppercase;
+}
+
+.bio-card-value {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+}
+
+.bio-value {
+  font-size: 28px;
+  font-weight: 700;
+  color: var(--text, #2A2825);
+  line-height: 1;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+  /* "—" glyph looks fine at large size; no special treatment needed */
+}
+
+.bio-unit {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-muted, #9A9690);
+  letter-spacing: 0.04em;
+}
+
+/* Subtle accent line on the left border when a value is live */
+.bio-card:has(.bio-value:not(:empty)):not(:has(.bio-value:empty)) {
+  border-left: 3px solid var(--accent, #D97757);
+}
+
+/* ── Analytics overlay — biometrics summary stats ──────────────────────── */
+/* avg-heart-rate and avg-spo2 share the same .a-stat class as other summary
+   stats, so they inherit all sizing/layout. The only addition needed is to
+   show "—" neatly when no PPG data is available (value is just text "—"). */
+
+#a-avg-heart-rate,
+#a-avg-spo2 {
+  font-variant-numeric: tabular-nums;
+}
+
+/* ── Responsive: stack biometrics on very small screens ─────────────────── */
+@media (max-width: 420px) {
+  .biometrics-row {
+    flex-direction: column;
+  }
+}
+
