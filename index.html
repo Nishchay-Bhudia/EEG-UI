@@ -53,7 +53,7 @@
         <span id="bt-device-name">—</span>
         <button id="btn-bt-disconnect" class="btn btn-sm btn-outline" onclick="disconnectBluetooth()">Disconnect</button>
       </div>
-      <button id="btn-bluetooth" class="btn btn-primary">Scan &amp; Connect Headband</button>
+      <button id="btn-bt-scan" class="btn btn-primary">Scan &amp; Connect Headband</button>
       <p class="settings-hint">
         Works with Muse, BrainBit, and any BLE EEG headband. Raw EEG is
         collected for 2 s then sent to your Render backend for full
@@ -420,6 +420,9 @@
     <!-- Sessions tab -->
     <div id="admin-tab-sessions" style="display:none">
       <h2>All Sessions</h2>
+      <div class="admin-search-wrap">
+        <input id="admin-sessions-search" class="input" type="search" placeholder="Filter by username…" />
+      </div>
       <table class="admin-table">
         <thead><tr><th>User</th><th>Session Name</th><th>Start</th><th>Duration</th><th>Epochs</th><th>Actions</th></tr></thead>
         <tbody id="admin-sessions-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
