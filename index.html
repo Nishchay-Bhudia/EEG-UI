@@ -3,494 +3,696 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EEG Dev Testing</title>
+  <title>EEG DEV TESTING</title>
   <link rel="stylesheet" href="style.css" />
+  <style>
+/* ── Analytics Notes ─────────────────────────────────────────────────── */
+.analytics-notes-content{font-size:13px;color:var(--text);line-height:1.7;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;min-height:48px;white-space:pre-wrap;word-break:break-word}
+.analytics-notes-empty{color:var(--text-muted);font-style:italic}
+
+/* ── Replay Player ───────────────────────────────────────────────────── */
+.replay-player{display:flex;flex-direction:column;gap:10px;width:100%}
+.replay-controls{display:flex;gap:8px;align-items:center}
+.replay-btn{min-width:40px}
+.replay-track{display:flex;align-items:center}
+.replay-slider{flex:1;cursor:pointer;accent-color:var(--accent)}
+.replay-meta{display:flex;gap:16px;font-size:12px;color:var(--text-muted);align-items:center}
+.replay-time{margin-left:auto}
+.replay-state-display{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px}
+.replay-state-row{display:flex;flex-direction:column;gap:2px}
+.replay-state-key{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
+.replay-state-val{font-size:14px;font-weight:600;color:var(--text)}
+.replay-no-data{font-size:13px;color:var(--text-muted);text-align:center;padding:16px 0;font-style:italic}
+  </style>
 </head>
 <body>
 
-<!-- ── LOGIN SCREEN ──────────────────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════
+     LOGIN SCREEN
+════════════════════════════════════════════════════════ -->
 <div id="login-screen" class="login-screen">
   <div class="login-card">
     <div class="login-brand">
       <div class="login-brand-icon">
-        <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M8 24 Q14 10 24 24 Q34 38 40 24" stroke-linecap="round"/>
-          <path d="M4 24 Q10 6 24 24 Q38 42 44 24" stroke-linecap="round" opacity=".4"/>
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="2.5"/>
+          <path d="M10 32 Q16 20 22 32 Q28 44 34 32 Q40 20 46 32 Q52 44 54 32" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
       <div class="login-brand-text">
-        <span class="login-brand-name">Neuro-Yogic</span>
+        <span class="login-brand-name">EEG Dev Testing</span>
         <span class="login-brand-sub">from brainwaves to bliss</span>
       </div>
     </div>
     <div class="login-form-section">
-      <p class="login-title">Sign In</p>
+      <div class="login-title">Sign In</div>
+      <div id="login-error" class="login-error" style="display:none"></div>
       <div class="login-field">
-        <label for="input-username">Username</label>
-        <input id="input-username" class="input" type="text" autocomplete="username" placeholder="Username" />
+        <label class="field-label" for="input-username">Username</label>
+        <input class="field-input" id="input-username" type="text" autocomplete="username" placeholder="Username" />
       </div>
       <div class="login-field">
-        <label for="input-password">Password</label>
-        <input id="input-password" class="input" type="password" autocomplete="current-password" placeholder="Password" />
+        <label class="field-label" for="input-password">Password</label>
+        <input class="field-input" id="input-password" type="password" autocomplete="current-password" placeholder="Password" />
       </div>
-      <p id="login-error" class="login-error" style="display:none"></p>
-      <button id="btn-login" class="btn btn-primary login-btn">Sign In</button>
+      <button class="btn btn-primary login-btn" id="btn-login">Sign In</button>
     </div>
   </div>
 </div>
 
-<!-- ── SETTINGS OVERLAY ───────────────────────────────────────────────────── -->
-<div id="settings-overlay" class="settings-overlay">
-  <div class="settings-panel">
-    <div class="settings-header">
-      <span class="settings-title">configuration</span>
-      <button id="btn-close-settings" class="btn-icon">✕</button>
-    </div>
-
-    <section class="settings-section">
-      <h3 class="settings-section-title">Bluetooth Headband</h3>
-      <div class="bt-device-row" id="bt-device-row" style="display:none">
-        <span id="bt-device-name">—</span>
-        <button id="btn-bt-disconnect" class="btn btn-sm btn-outline" onclick="disconnectBluetooth()">Disconnect</button>
-      </div>
-      <button id="btn-bt-scan" class="btn btn-primary">Scan &amp; Connect Headband</button>
-      <p class="settings-hint">
-        Works with Muse, BrainBit, and any BLE EEG headband. Raw EEG is
-        collected for 2 s then sent to your Render backend for full
-        Random-Forest classification — or processed locally if no backend
-        is configured. Requires <code>Chrome</code> or <code>Edge</code>.
-      </p>
-    </section>
-
-    <section class="settings-section">
-      <h3 class="settings-section-title">Render Backend URL</h3>
-      <div class="input-row">
-        <input id="input-backend-url" class="input" type="url" placeholder="Backend URL" />
-      </div>
-      <p class="settings-hint">
-        The backend must expose <code>POST /analyze</code> (raw EEG) and
-        optionally <code>POST /analyze/bands</code> (pre-computed powers).
-      </p>
-      <div class="settings-actions">
-        <button id="btn-test" class="btn btn-outline btn-sm">Test connection</button>
-        <button id="btn-save" class="btn btn-primary btn-sm">Save &amp; connect</button>
-      </div>
-      <p id="test-msg" style="display:none" class="test-msg"></p>
-    </section>
-
-    <section class="settings-section settings-api-doc">
-      <h4>Raw EEG endpoint</h4>
-      <pre><code>POST /analyze
-{
-  "eeg_data": [[ch0_s0, ch0_s1, ...], [ch1_s0, ...]],
-  "sample_rate": 256,
-  "ppg_ir":  [ir_s0, ir_s1, ...],   // optional
-  "ppg_red": [r_s0, r_s1, ...]      // optional
-}</code></pre>
-
-      <h4>Pre-computed bands endpoint</h4>
-      <pre><code>POST /analyze/bands
-{ "delta": 0.12, "theta": 0.22, "alpha": 0.41,
-  "beta": 0.18, "gamma": 0.07 }</code></pre>
-
-      <h4>Response (both endpoints)</h4>
-      <pre><code>{
-  "chitta_bhumi": { "state": "Ekagra", "confidence": "82.4%" },
-  "swara":        { "state": "Ida (Parasympathetic)" },
-  "tattva":       ["Pratyahara Window detected"],
-  "depth":        "Deep",
-  "eeg_spectrum": { "alpha": 41.2, "theta": 28.0, ... },
-  "gunas":        { "sattva": 0.52, "rajas": 0.31, "tamas": 0.17,
-                    "label": "Sattvic" },
-  "heart_rate":   72.0,   // BPM or null
-  "spo2":         98.5    // % or null
-}</code></pre>
-    </section>
-  </div>
-</div>
-
-<!-- ── MAIN HEADER ─────────────────────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════
+     MAIN HEADER
+════════════════════════════════════════════════════════ -->
 <header id="main-header" class="header" style="display:none">
   <div class="header-inner">
     <div class="brand">
       <div class="brand-icon">
-        <svg viewBox="0 0 48 48" fill="none" stroke="currentColor" stroke-width="1.5">
-          <path d="M8 24 Q14 10 24 24 Q34 38 40 24" stroke-linecap="round"/>
-          <path d="M4 24 Q10 6 24 24 Q38 42 44 24" stroke-linecap="round" opacity=".4"/>
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="2.5"/>
+          <path d="M10 32 Q16 20 22 32 Q28 44 34 32 Q40 20 46 32 Q52 44 54 32" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
         </svg>
       </div>
       <div class="brand-text">
-        <span class="brand-name">Neuro-Yogic</span>
-        <span class="brand-sub">EEG Cognitive Mapper</span>
+        <span class="brand-name">EEG Dev Testing</span>
+        <span class="brand-sub">from brainwaves to bliss</span>
       </div>
     </div>
-    <div class="header-actions">
-      <button id="btn-settings" class="btn btn-outline btn-sm">⚙ Settings</button>
-      <div class="user-menu-wrap">
-        <button id="btn-user-menu" class="btn-user-menu">
-          <span id="user-avatar-initial" class="user-avatar">?</span>
-          <span id="user-display-name" class="user-name">—</span>
-          <span class="user-caret">▾</span>
+    <div class="header-right">
+      <!-- Admin Dashboard Button -->
+      <button class="btn btn-ghost" id="btn-open-admin" style="display:none">
+        Admin Dashboard
+      </button>
+
+      <!-- Settings -->
+      <button class="btn btn-ghost" id="btn-settings">⚙</button>
+
+      <!-- User menu -->
+      <div class="user-menu" id="user-menu-wrapper">
+        <button class="user-avatar" id="btn-user-menu">
+          <span id="user-avatar-initial">?</span>
         </button>
-        <div id="user-dropdown" class="user-dropdown" style="display:none">
-          <p class="user-role-label" id="user-menu-role">user</p>
-          <hr class="dropdown-divider"/>
-          <button id="btn-open-admin" class="dropdown-item" style="display:none">Admin Dashboard</button>
-          <button id="btn-logout" class="dropdown-item dropdown-item-danger">Sign Out</button>
+        <div class="user-dropdown" id="user-dropdown" style="display:none">
+          <div class="user-dropdown-info">
+            <span id="user-display-name" class="user-dropdown-name">—</span>
+            <span id="user-menu-role" class="user-dropdown-role">—</span>
+          </div>
+          <hr class="dropdown-divider" />
+          <button class="dropdown-item" id="btn-logout">Sign out</button>
         </div>
       </div>
     </div>
   </div>
 </header>
 
-<!-- ── MAIN CONTENT ───────────────────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════
+     SETTINGS OVERLAY
+════════════════════════════════════════════════════════ -->
+<div id="settings-overlay" class="settings-overlay">
+  <div class="settings-panel">
+    <div class="settings-header">
+      <span class="settings-title">configuration</span>
+      <button class="btn btn-ghost" id="btn-close-settings">✕</button>
+    </div>
+
+    <!-- Bluetooth -->
+    <div class="settings-section">
+      <div class="settings-section-title">Bluetooth Headband</div>
+      <div id="bt-device-row" class="bt-device-row" style="display:none">
+        <span id="bt-device-name" class="bt-device-name">—</span>
+        <button class="btn btn-ghost btn-sm" id="btn-bt-disconnect">Disconnect</button>
+      </div>
+      <button class="btn btn-secondary" id="btn-bt-scan">Scan &amp; Connect Headband</button>
+      <p class="settings-note">
+        Works with Muse, BrainBit, and any BLE EEG headband. Raw EEG is
+        collected for 2&thinsp;s then sent to your Render backend for full
+        Random-Forest classification — or processed locally if no backend
+        is configured. Requires <code>Chrome</code> or <code>Edge</code>.
+      </p>
+    </div>
+
+    <!-- Backend URL -->
+    <div class="settings-section">
+      <div class="settings-section-title">Render Backend URL</div>
+      <div class="settings-field">
+        <label class="field-label" for="input-backend-url">Backend URL</label>
+        <input class="field-input" id="input-backend-url" type="url"
+               placeholder="https://your-app.onrender.com" />
+      </div>
+      <p class="settings-note">
+        The backend must expose <code>POST /analyze</code> (raw EEG) and
+        optionally <code>POST /analyze/bands</code> (pre-computed powers).
+      </p>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-ghost btn-sm" id="btn-test">Test connection</button>
+        <button class="btn btn-primary btn-sm" id="btn-save">Save &amp; connect</button>
+      </div>
+      <div id="test-msg" style="display:none;font-size:12px;margin-top:6px"></div>
+    </div>
+
+    <!-- API reference -->
+    <div class="settings-section">
+      <div class="settings-section-title">Raw EEG endpoint</div>
+      <pre class="settings-code">POST /analyze
+{
+  "eeg_data": [[ch0_s0, ch0_s1, ...], [ch1_s0, ...]],
+  "sample_rate": 256
+}</pre>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Pre-computed bands endpoint</div>
+      <pre class="settings-code">POST /analyze/bands
+{ "delta": 0.12, "theta": 0.22, "alpha": 0.41,
+  "beta": 0.18, "gamma": 0.07 }</pre>
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Response (both endpoints)</div>
+      <pre class="settings-code">{
+  "chitta_bhumi": { "state": "Ekagra", "confidence": "82.4%" },
+  "swara":        { "state": "Ida (Parasympathetic)" },
+  "tattva":       ["Pratyahara Window detected"],
+  "depth":        "Deep",
+  "eeg_spectrum": { "alpha": 41.2, "theta": 28.0, ... },
+  "gunas":        { "sattva": 0.52, "rajas": 0.31, "tamas": 0.17,
+                    "label": "Sattvic" }
+}</pre>
+    </div>
+  </div>
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     MAIN CONTENT — EEG Dashboard
+════════════════════════════════════════════════════════ -->
 <main id="main-content" class="main-content" style="display:none">
-  <div class="content-inner">
+  <div class="dashboard-grid">
 
-    <!-- Stats bar -->
-    <div class="stats-row">
-      <div class="stat-pill"><span class="stat-label">EPOCH</span><span id="val-epoch" class="stat-val">—</span></div>
-      <div class="stat-pill"><span class="stat-label">QUALITY</span><span id="val-quality" class="stat-val">awaiting signal</span></div>
-      <div class="stat-pill"><span class="stat-label">LATENCY</span><span id="val-latency" class="stat-val">—</span><span class="stat-unit">ms</span></div>
-      <div class="stat-pill"><span class="stat-label">BUFFER</span><span id="val-buffer" class="stat-val">0 / 512</span></div>
-      <div class="stat-pill"><span class="stat-label">MODE</span><span id="val-mode" class="stat-val">—</span></div>
-      <div class="stat-pill"><span class="stat-label">BOARD</span><span id="val-board" class="stat-val">—</span></div>
-    </div>
-
-    <!-- Status -->
-    <div class="status-bar">
-      <div class="status-indicator">
-        <span id="status-dot" class="status-dot"></span>
-        <span class="status-label">STATUS</span>
-        <span id="status-text" class="status-text">disconnected</span>
+    <!-- ─ Live Metric Bar ─ -->
+    <div class="metric-bar card">
+      <div class="metric-item">
+        <span class="metric-label">EPOCH</span>
+        <span class="metric-value" id="val-epoch">—</span>
       </div>
-    </div>
-
-    <!-- ── BIOMETRICS ROW (Heart Rate + Blood Oxygen) ──────────────────────
-         Widgets are always visible. Values show '—' silently when the
-         connected headset has no PPG sensor — no error displayed.
-    ──────────────────────────────────────────────────────────────────────── -->
-    <div class="biometrics-row">
-      <div class="bio-card">
-        <div class="bio-card-label">HEART RATE</div>
-        <div class="bio-card-value">
-          <span id="val-heart-rate" class="bio-value">—</span>
-          <span class="bio-unit">BPM</span>
-        </div>
+      <div class="metric-item">
+        <span class="metric-label">QUALITY</span>
+        <span class="metric-value" id="val-quality">awaiting signal</span>
       </div>
-      <div class="bio-card">
-        <div class="bio-card-label">BLOOD OXYGEN</div>
-        <div class="bio-card-value">
-          <span id="val-spo2" class="bio-value">—</span>
-          <span class="bio-unit">SpO₂ %</span>
+      <div class="metric-item">
+        <span class="metric-label">LATENCY</span>
+        <span class="metric-value"><span id="val-latency">—</span> <span class="metric-unit">ms</span></span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">BUFFER</span>
+        <span class="metric-value" id="val-buffer">0 / 512</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">MODE</span>
+        <span class="metric-value" id="val-mode">—</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">BOARD</span>
+        <span class="metric-value" id="val-board">—</span>
+      </div>
+      <div class="metric-item">
+        <span class="metric-label">STATUS</span>
+        <div class="status-indicator" id="status-indicator">
+          <span class="status-dot" id="status-dot"></span>
+          <span class="status-text" id="status-text">disconnected</span>
         </div>
       </div>
     </div>
 
-    <!-- EEG waveform canvas -->
-    <div class="waveform-wrap">
-      <canvas id="eeg-canvas" class="eeg-canvas"></canvas>
+    <!-- ─ EEG Waveform Canvas ─ -->
+    <div class="card canvas-card">
+      <canvas id="eeg-canvas"></canvas>
     </div>
 
-    <!-- Grid of cards -->
-    <div class="cards-grid">
-
-      <!-- CHITTA BHUMI -->
-      <div class="card card-chitta">
-        <div class="card-head">
-          <span class="card-label">CHITTA BHUMI</span>
-          <span id="chitta-state" class="chitta-state">—</span>
+    <!-- ─ Chitta Bhumi ─ -->
+    <div class="card chitta-card">
+      <div class="card-label">CHITTA BHUMI</div>
+      <div class="chitta-state" id="chitta-state">—</div>
+      <div class="chitta-sub" id="chitta-sub">awaiting signal</div>
+      <div class="depth-track">
+        <div class="depth-stops">
+          <span class="depth-stop" data-stop="Kshipta">Kshipta</span>
+          <span class="depth-stop" data-stop="Vikshipta">Vikshipta</span>
+          <span class="depth-stop" data-stop="Ekagra">Ekagra</span>
+          <span class="depth-stop" data-stop="Niruddha">Niruddha</span>
         </div>
-        <p id="chitta-sub" class="chitta-sub">awaiting signal</p>
-
-        <div class="depth-states">
-          <span class="depth-state ds-kshipta">Kshipta</span>
-          <span class="depth-state ds-vikshipta">Vikshipta</span>
-          <span class="depth-state ds-ekagra">Ekagra</span>
-          <span class="depth-state ds-niruddha">Niruddha</span>
-        </div>
-
-        <div class="depth-bar-wrap">
-          <div id="depth-fill" class="depth-fill"></div>
-        </div>
-
-        <div class="chitta-meta">
-          <div class="meta-row"><span class="meta-label">CONFIDENCE</span><span id="val-confidence" class="meta-val">—</span></div>
-        </div>
-
-        <div class="probs-section">
-          <p class="probs-title">STATE PROBABILITIES</p>
-          <div class="prob-row"><span class="prob-label">Kshipta</span><div class="prob-bar-wrap"><div id="bar-kshipta" class="prob-bar bar-kshipta"></div></div><span id="prob-kshipta" class="prob-pct">—</span></div>
-          <div class="prob-row"><span class="prob-label">Vikshipta</span><div class="prob-bar-wrap"><div id="bar-vikshipta" class="prob-bar bar-vikshipta"></div></div><span id="prob-vikshipta" class="prob-pct">—</span></div>
-          <div class="prob-row"><span class="prob-label">Ekagra</span><div class="prob-bar-wrap"><div id="bar-ekagra" class="prob-bar bar-ekagra"></div></div><span id="prob-ekagra" class="prob-pct">—</span></div>
-          <div class="prob-row"><span class="prob-label">Niruddha</span><div class="prob-bar-wrap"><div id="bar-niruddha" class="prob-bar bar-niruddha"></div></div><span id="prob-niruddha" class="prob-pct">—</span></div>
-        </div>
-
-        <div class="chitta-meta">
-          <div class="meta-row"><span class="meta-label">CONTEMPLATIVE DEPTH</span><span id="val-depth" class="meta-val">—</span></div>
+        <div class="depth-bar">
+          <div class="depth-fill" id="depth-fill"></div>
         </div>
       </div>
-
-      <!-- SWARA NADI -->
-      <div class="card card-swara">
-        <div class="card-head"><span class="card-label">SWARA NADI</span></div>
-
-        <div class="swara-glyphs">
-          <div id="glyph-ida" class="swara-glyph">
-            <span class="glyph-icon">🌙</span>
-            <span class="glyph-name">Ida</span>
-            <span class="glyph-sub">lunar · left</span>
-          </div>
-          <div id="glyph-sushumna" class="swara-glyph">
-            <span class="glyph-icon">⚖️</span>
-            <span class="glyph-name">Sushumna</span>
-            <span class="glyph-sub">balanced</span>
-          </div>
-          <div id="glyph-pingala" class="swara-glyph">
-            <span class="glyph-icon">☀️</span>
-            <span class="glyph-name">Pingala</span>
-            <span class="glyph-sub">solar · right</span>
-          </div>
-        </div>
-
-        <div class="asym-bar-wrap">
-          <span class="asym-side">L</span>
-          <div class="asym-track">
-            <div id="asym-fill" class="asym-fill"></div>
-            <div id="asym-thumb" class="asym-thumb"></div>
-          </div>
-          <span class="asym-side">R</span>
-        </div>
-
-        <p id="swara-note" class="swara-note">—</p>
-        <div class="meta-row"><span class="meta-label">CONFIDENCE</span><span id="swara-confidence" class="meta-val">—</span></div>
+      <div class="chitta-meta">
+        <span class="meta-label">CONFIDENCE</span>
+        <span class="meta-value" id="val-confidence">—</span>
       </div>
-
-      <!-- SPECTRAL BAND POWERS -->
-      <div class="card card-bands">
-        <div class="card-head"><span class="card-label">SPECTRAL BAND POWERS</span></div>
-        <div class="bands-list">
-          <div class="band-row">
-            <span class="band-sym band-delta">δ</span>
-            <span class="band-name">Delta<span class="band-hz">1–4 Hz</span></span>
-            <div class="band-bar-wrap"><div id="bar-delta" class="band-bar" style="background:var(--delta)"></div></div>
-            <span id="val-delta" class="band-val">—</span>
-          </div>
-          <div class="band-row">
-            <span class="band-sym band-theta">θ</span>
-            <span class="band-name">Theta<span class="band-hz">4–8 Hz</span></span>
-            <div class="band-bar-wrap"><div id="bar-theta" class="band-bar" style="background:var(--theta)"></div></div>
-            <span id="val-theta" class="band-val">—</span>
-          </div>
-          <div class="band-row">
-            <span class="band-sym band-alpha">α</span>
-            <span class="band-name">Alpha<span class="band-hz">8–13 Hz</span></span>
-            <div class="band-bar-wrap"><div id="bar-alpha" class="band-bar" style="background:var(--alpha)"></div></div>
-            <span id="val-alpha" class="band-val">—</span>
-          </div>
-          <div class="band-row">
-            <span class="band-sym band-beta">β</span>
-            <span class="band-name">Beta<span class="band-hz">13–30 Hz</span></span>
-            <div class="band-bar-wrap"><div id="bar-beta" class="band-bar" style="background:var(--beta)"></div></div>
-            <span id="val-beta" class="band-val">—</span>
-          </div>
-          <div class="band-row">
-            <span class="band-sym band-gamma">γ</span>
-            <span class="band-name">Gamma<span class="band-hz">30–50 Hz</span></span>
-            <div class="band-bar-wrap"><div id="bar-gamma" class="band-bar" style="background:var(--gamma)"></div></div>
-            <span id="val-gamma" class="band-val">—</span>
-          </div>
-        </div>
-      </div>
-
-      <!-- TRIGUNAS -->
-      <div class="card card-gunas">
-        <div class="card-head">
-          <span class="card-label">TRIGUNAS</span>
-          <span id="gunas-dominant" class="gunas-dominant">—</span>
-        </div>
-        <p id="gunas-note" class="gunas-note"></p>
-        <div class="guna-row">
-          <span class="guna-sym guna-sattva">☀</span>
-          <span class="guna-name">Sattva<span class="guna-sub">clarity</span></span>
-          <div class="guna-bar-wrap"><div id="bar-sattva" class="guna-bar" style="background:var(--sattva)"></div></div>
-          <span id="val-sattva" class="guna-val">—</span>
-        </div>
-        <div class="guna-row">
-          <span class="guna-sym guna-rajas">🔥</span>
-          <span class="guna-name">Rajas<span class="guna-sub">activity</span></span>
-          <div class="guna-bar-wrap"><div id="bar-rajas" class="guna-bar" style="background:var(--rajas)"></div></div>
-          <span id="val-rajas" class="guna-val">—</span>
-        </div>
-        <div class="guna-row">
-          <span class="guna-sym guna-tamas">🌑</span>
-          <span class="guna-name">Tamas<span class="guna-sub">inertia</span></span>
-          <div class="guna-bar-wrap"><div id="bar-tamas" class="guna-bar" style="background:var(--tamas)"></div></div>
-          <span id="val-tamas" class="guna-val">—</span>
-        </div>
-      </div>
-
-    </div><!-- /cards-grid -->
-
-    <!-- TATTVA / CHAKRA CORRELATES -->
-    <div class="card card-tattva">
-      <div class="card-head"><span class="card-label">TATTVA / CHAKRA CORRELATES</span></div>
-      <div id="tattva-flags" class="tattva-flags"><span class="tattva-none">no flags active</span></div>
     </div>
 
-    <!-- SESSION MANAGEMENT -->
-    <div class="card card-session">
-      <div class="card-head"><span class="card-label">SESSION MANAGEMENT</span></div>
+    <!-- ─ State Probabilities ─ -->
+    <div class="card probs-card">
+      <div class="card-label">STATE PROBABILITIES</div>
+      <div class="prob-list">
+        <div class="prob-item">
+          <div class="prob-header"><span class="prob-name kshipta-label">Kshipta</span><span class="prob-val" id="prob-kshipta">—</span></div>
+          <div class="prob-bar-bg"><div class="prob-bar kshipta-bar" id="bar-kshipta"></div></div>
+        </div>
+        <div class="prob-item">
+          <div class="prob-header"><span class="prob-name vikshipta-label">Vikshipta</span><span class="prob-val" id="prob-vikshipta">—</span></div>
+          <div class="prob-bar-bg"><div class="prob-bar vikshipta-bar" id="bar-vikshipta"></div></div>
+        </div>
+        <div class="prob-item">
+          <div class="prob-header"><span class="prob-name ekagra-label">Ekagra</span><span class="prob-val" id="prob-ekagra">—</span></div>
+          <div class="prob-bar-bg"><div class="prob-bar ekagra-bar" id="bar-ekagra"></div></div>
+        </div>
+        <div class="prob-item">
+          <div class="prob-header"><span class="prob-name niruddha-label">Niruddha</span><span class="prob-val" id="prob-niruddha">—</span></div>
+          <div class="prob-bar-bg"><div class="prob-bar niruddha-bar" id="bar-niruddha"></div></div>
+        </div>
+      </div>
+      <div class="chitta-meta">
+        <span class="meta-label">CONTEMPLATIVE DEPTH</span>
+        <span class="meta-value" id="val-depth">—</span>
+      </div>
+    </div>
+
+    <!-- ─ Swara Nadi ─ -->
+    <div class="card swara-card">
+      <div class="card-label">SWARA NADI</div>
+      <div class="swara-glyphs">
+        <div class="swara-glyph" id="glyph-ida">
+          <div class="swara-symbol">🌙</div>
+          <div class="swara-name">Ida</div>
+          <div class="swara-sub">lunar · left</div>
+        </div>
+        <div class="swara-glyph active-sushumna" id="glyph-sushumna">
+          <div class="swara-symbol">⚖️</div>
+          <div class="swara-name">Sushumna</div>
+          <div class="swara-sub">balanced</div>
+        </div>
+        <div class="swara-glyph" id="glyph-pingala">
+          <div class="swara-symbol">☀️</div>
+          <div class="swara-name">Pingala</div>
+          <div class="swara-sub">solar · right</div>
+        </div>
+      </div>
+      <div class="asym-track">
+        <span class="asym-label">L</span>
+        <div class="asym-bar">
+          <div class="asym-fill" id="asym-fill"></div>
+          <div class="asym-thumb" id="asym-thumb"></div>
+        </div>
+        <span class="asym-label">R</span>
+      </div>
+      <div class="swara-note" id="swara-note">—</div>
+      <div class="chitta-meta">
+        <span class="meta-label">CONFIDENCE</span>
+        <span class="meta-value" id="swara-confidence">—</span>
+      </div>
+    </div>
+
+    <!-- ─ Spectral Band Powers ─ -->
+    <div class="card bands-card">
+      <div class="card-label">SPECTRAL BAND POWERS</div>
+      <div class="band-list">
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym delta-sym">δ</span>
+            <span class="band-name">Delta</span>
+            <span class="band-hz">1–4 Hz</span>
+            <span class="band-val" id="val-delta">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar delta-bar" id="bar-delta"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym theta-sym">θ</span>
+            <span class="band-name">Theta</span>
+            <span class="band-hz">4–8 Hz</span>
+            <span class="band-val" id="val-theta">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar theta-bar" id="bar-theta"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym alpha-sym">α</span>
+            <span class="band-name">Alpha</span>
+            <span class="band-hz">8–13 Hz</span>
+            <span class="band-val" id="val-alpha">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar alpha-bar" id="bar-alpha"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym beta-sym">β</span>
+            <span class="band-name">Beta</span>
+            <span class="band-hz">13–30 Hz</span>
+            <span class="band-val" id="val-beta">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar beta-bar" id="bar-beta"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym gamma-sym">γ</span>
+            <span class="band-name">Gamma</span>
+            <span class="band-hz">30–50 Hz</span>
+            <span class="band-val" id="val-gamma">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar gamma-bar" id="bar-gamma"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─ Trigunas (NEW) ─ -->
+    <div class="card gunas-card">
+      <div class="card-label">TRIGUNAS</div>
+      <div class="gunas-label-row">
+        <span class="gunas-dominant" id="gunas-dominant">—</span>
+        <span class="gunas-note" id="gunas-note"></span>
+      </div>
+      <div class="band-list">
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym sattva-sym">☀</span>
+            <span class="band-name">Sattva</span>
+            <span class="band-hz">clarity</span>
+            <span class="band-val" id="val-sattva">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar sattva-bar" id="bar-sattva"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym rajas-sym">🔥</span>
+            <span class="band-name">Rajas</span>
+            <span class="band-hz">activity</span>
+            <span class="band-val" id="val-rajas">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar rajas-bar" id="bar-rajas"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym tamas-sym">🌑</span>
+            <span class="band-name">Tamas</span>
+            <span class="band-hz">inertia</span>
+            <span class="band-val" id="val-tamas">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar tamas-bar" id="bar-tamas"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─ Tattva / Chakra Correlates ─ -->
+    <div class="card tattva-card">
+      <div class="card-label">TATTVA / CHAKRA CORRELATES</div>
+      <div class="tattva-flags" id="tattva-flags">no flags active</div>
+    </div>
+
+    <!-- ─ Session Management ─ -->
+    <div class="card session-card">
+      <div class="card-label">SESSION MANAGEMENT</div>
       <div class="session-controls">
-        <button id="btn-start-session" class="btn btn-primary">Start Session</button>
-        <span id="session-name-display" class="session-name">—</span>
-        <span id="session-timer" class="session-timer">0:00</span>
-        <button id="btn-end-session" class="btn btn-outline" style="display:none">End Session</button>
+        <button class="btn btn-primary" id="btn-start-session">Start Session</button>
+        <div class="session-timer-row">
+          <span class="session-name-display" id="session-name-display">—</span>
+          <span class="session-timer" id="session-timer">0:00</span>
+        </div>
+        <button class="btn btn-danger" id="btn-end-session" style="display:none">End Session</button>
       </div>
-      <div class="session-notes-wrap">
-        <label class="notes-label">SESSION NOTES</label>
-        <textarea id="session-notes" class="session-notes" placeholder="Your notes…" rows="3"></textarea>
-      </div>
-      <div class="mode-buttons">
-        <button id="btn-bluetooth" class="btn btn-outline">📡 Bluetooth</button>
-        <button id="btn-demo"      class="btn btn-outline">▶ Demo</button>
+      <div class="session-notes-section">
+        <div class="session-notes-label">SESSION NOTES</div>
+        <textarea class="session-notes-input" id="session-notes" placeholder="Notes for this session…" rows="3"></textarea>
       </div>
     </div>
 
-    <!-- SESSION HISTORY -->
-    <div class="card card-history">
-      <div class="card-head">
+    <!-- ─ Mode Buttons ─ -->
+    <div class="mode-buttons card">
+      <button class="btn btn-secondary" id="btn-bluetooth">
+        <span class="btn-icon">📡</span> Bluetooth
+      </button>
+      <button class="btn btn-secondary" id="btn-demo">
+        <span class="btn-icon">▶</span> Demo
+      </button>
+    </div>
+
+    <!-- ─ Session History ─ -->
+    <div class="card history-card">
+      <div class="history-header">
         <span class="card-label">SESSION HISTORY</span>
-        <button id="btn-toggle-history" class="btn btn-sm btn-outline">Show</button>
+        <button class="btn btn-ghost btn-sm" id="btn-toggle-history">Show</button>
       </div>
       <div id="history-list" class="history-list" style="display:none">
-        <p id="history-empty" class="text-muted">No sessions yet</p>
+        <div id="history-empty" class="history-empty">No sessions yet</div>
       </div>
     </div>
 
-  </div><!-- /content-inner -->
+  </div><!-- /dashboard-grid -->
 </main>
 
-<!-- ── ADMIN PAGE ──────────────────────────────────────────────────────────── -->
-<div id="admin-page" class="admin-page" style="display:none">
-  <div class="admin-inner">
-    <div class="admin-nav">
-      <button id="btn-back-to-dashboard" class="btn btn-outline btn-sm">← Dashboard</button>
-    </div>
-    <h1 class="admin-title">Admin Dashboard</h1>
+<!-- ═══════════════════════════════════════════════════════
+     BLUETOOTH WIZARD MODAL
+════════════════════════════════════════════════════════ -->
 
+
+<!-- ═══════════════════════════════════════════════════════
+     ADMIN PAGE  (full dedicated page, replaces main content)
+════════════════════════════════════════════════════════ -->
+<div id="admin-page" class="admin-page" style="display:none">
+  <div class="admin-page-inner">
+
+    <!-- Admin Header -->
+    <div class="admin-page-header">
+      <button class="btn btn-ghost" id="btn-back-to-dashboard">← Dashboard</button>
+      <h1 class="admin-page-title">Admin Dashboard</h1>
+      <span></span><!-- spacer -->
+    </div>
+
+    <!-- Tabs -->
     <div class="admin-tabs">
       <button class="admin-tab active" data-tab="users">Users</button>
       <button class="admin-tab" data-tab="sessions">Sessions</button>
     </div>
 
-    <!-- Users tab -->
-    <div id="admin-tab-users">
+    <!-- ── Users Tab ── -->
+    <div id="admin-tab-users" class="admin-tab-panel">
       <div class="admin-section-header">
-        <h2>User Accounts</h2>
-        <button id="btn-add-user" class="btn btn-primary btn-sm">+ Add User</button>
+        <h2 class="admin-section-title">User Accounts</h2>
+        <button class="btn btn-primary btn-sm" id="btn-add-user">+ Add User</button>
       </div>
 
-      <div id="create-user-form" class="inline-form" style="display:none">
-        <input id="new-username" class="input" placeholder="Username" />
-        <input id="new-password" class="input" type="password" placeholder="Password" />
-        <select id="new-role" class="input select-input">
-          <option value="user">User</option>
-          <option value="admin">Admin</option>
-        </select>
-        <button id="btn-submit-create" class="btn btn-primary btn-sm">Create</button>
-        <button id="btn-cancel-create" class="btn btn-outline btn-sm">Cancel</button>
-        <p id="create-user-error" class="form-error" style="display:none"></p>
+      <!-- Create user form -->
+      <div id="create-user-form" class="admin-form-card" style="display:none">
+        <div class="admin-form-row">
+          <input class="field-input" id="new-username" placeholder="Username" />
+          <input class="field-input" id="new-password" type="password" placeholder="Password" />
+          <select class="field-input" id="new-role">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
+          </select>
+          <button class="btn btn-primary btn-sm" id="btn-create-user">Create</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-create-user">Cancel</button>
+        </div>
+        <div id="create-user-error" class="form-error" style="display:none"></div>
       </div>
 
-      <div id="reset-pw-form" class="inline-form" style="display:none">
-        <span>Reset password for <strong id="reset-pw-target"></strong></span>
-        <input id="new-pw-input" class="input" type="password" placeholder="New password" />
-        <button id="btn-submit-reset-pw" class="btn btn-primary btn-sm">Save</button>
-        <button id="btn-cancel-reset-pw" class="btn btn-outline btn-sm">Cancel</button>
-        <p id="reset-pw-error" class="form-error" style="display:none"></p>
+      <!-- Reset password form -->
+      <div id="reset-pw-form" class="admin-form-card" style="display:none">
+        <div class="admin-form-row">
+          <input class="field-input" id="reset-pw-input" type="password" placeholder="New password for user" />
+          <button class="btn btn-primary btn-sm" id="btn-save-reset-pw">Save</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-reset-pw">Cancel</button>
+        </div>
       </div>
 
-      <table class="admin-table">
-        <thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Actions</th></tr></thead>
-        <tbody id="admin-users-tbody"><tr><td colspan="4">Loading…</td></tr></tbody>
-      </table>
+      <div class="table-wrapper">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Role</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="admin-users-tbody">
+            <tr><td colspan="4" class="table-loading">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
 
-    <!-- Sessions tab -->
-    <div id="admin-tab-sessions" style="display:none">
-      <h2>All Sessions</h2>
-      <div class="admin-search-wrap">
-        <input id="admin-sessions-search" class="input" type="search" placeholder="Filter by username…" />
+    <!-- ── Sessions Tab ── -->
+    <div id="admin-tab-sessions" class="admin-tab-panel" style="display:none">
+      <div class="admin-section-header">
+        <h2 class="admin-section-title">All Sessions</h2>
+        <input class="field-input field-input-sm" id="admin-sessions-search"
+               placeholder="Search user…" style="max-width:200px" />
       </div>
-      <table class="admin-table">
-        <thead><tr><th>User</th><th>Session Name</th><th>Start</th><th>Duration</th><th>Epochs</th><th>Actions</th></tr></thead>
-        <tbody id="admin-sessions-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
-      </table>
+
+      <div class="table-wrapper">
+        <table class="admin-table" id="admin-sessions-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Session Name</th>
+              <th>Start</th>
+              <th>Duration</th>
+              <th>Epochs</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="admin-sessions-tbody">
+            <tr><td colspan="6" class="table-loading">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
     </div>
-  </div>
+
+  </div><!-- /admin-page-inner -->
 </div>
 
-<!-- ── ANALYTICS OVERLAY ──────────────────────────────────────────────────── -->
+<!-- ═══════════════════════════════════════════════════════
+     SESSION ANALYTICS MODAL
+     Overlays the admin page when a session is selected
+════════════════════════════════════════════════════════ -->
 <div id="analytics-overlay" class="analytics-overlay" style="display:none">
   <div class="analytics-panel">
+
     <div class="analytics-header">
       <div>
-        <h2 id="analytics-session-name" class="analytics-title">—</h2>
-        <p id="analytics-session-meta" class="analytics-meta"></p>
+        <h2 class="analytics-title" id="analytics-session-name">Session Analytics</h2>
+        <p class="analytics-subtitle" id="analytics-session-meta"></p>
       </div>
-      <button id="btn-close-analytics" class="btn-icon">✕ Close</button>
+      <button class="btn btn-ghost" id="btn-close-analytics">✕ Close</button>
     </div>
 
-    <p id="analytics-loading" class="text-muted">Loading session data…</p>
-    <p id="analytics-error" class="text-danger" style="display:none"></p>
+    <!-- Loading / error state -->
+    <div id="analytics-loading" class="analytics-loading">Loading session data…</div>
+    <div id="analytics-error" class="analytics-error" style="display:none"></div>
 
+    <!-- Analytics content (shown after load) -->
     <div id="analytics-content" style="display:none">
-      <!-- Summary stats -->
-      <div class="analytics-stats-row">
-        <div class="a-stat"><span class="a-stat-val" id="a-total-epochs">—</span><span class="a-stat-label">Epochs</span></div>
-        <div class="a-stat"><span class="a-stat-val" id="a-duration">—</span><span class="a-stat-label">Duration</span></div>
-        <div class="a-stat"><span class="a-stat-val" id="a-dominant-guna">—</span><span class="a-stat-label">Dominant Guna</span></div>
-        <div class="a-stat"><span class="a-stat-val" id="a-dominant-state">—</span><span class="a-stat-label">Primary State</span></div>
-        <!-- Biometrics averages — only shown if PPG data was available -->
-        <div class="a-stat"><span class="a-stat-val" id="a-avg-heart-rate">—</span><span class="a-stat-label">Avg Heart Rate</span></div>
-        <div class="a-stat"><span class="a-stat-val" id="a-avg-spo2">—</span><span class="a-stat-label">Avg SpO₂</span></div>
-      </div>
 
-      <!-- Trigunas -->
-      <div class="analytics-section">
-        <h3 class="analytics-section-title">Trigunas — Session Average</h3>
-        <div class="a-guna-row"><span class="a-guna-label">☀ Sattva</span><div class="a-bar-wrap"><div id="a-bar-sattva" class="a-bar a-bar-sattva"></div></div><span id="a-pct-sattva" class="a-pct">—</span></div>
-        <div class="a-guna-row"><span class="a-guna-label">🔥 Rajas</span><div class="a-bar-wrap"><div id="a-bar-rajas" class="a-bar a-bar-rajas"></div></div><span id="a-pct-rajas" class="a-pct">—</span></div>
-        <div class="a-guna-row"><span class="a-guna-label">🌑 Tamas</span><div class="a-bar-wrap"><div id="a-bar-tamas" class="a-bar a-bar-tamas"></div></div><span id="a-pct-tamas" class="a-pct">—</span></div>
-      </div>
-
-      <!-- Chitta + Swara breakdowns -->
-      <div class="analytics-two-col">
-        <div class="analytics-section">
-          <h3 class="analytics-section-title">Chitta Bhumi Distribution</h3>
-          <div id="a-state-breakdown"></div>
+      <!-- Summary row -->
+      <div class="analytics-summary-row">
+        <div class="analytics-stat">
+          <span class="analytics-stat-value" id="a-total-epochs">—</span>
+          <span class="analytics-stat-label">Epochs</span>
         </div>
-        <div class="analytics-section">
-          <h3 class="analytics-section-title">Swara Distribution</h3>
-          <div id="a-swara-breakdown"></div>
+        <div class="analytics-stat">
+          <span class="analytics-stat-value" id="a-duration">—</span>
+          <span class="analytics-stat-label">Duration</span>
+        </div>
+        <div class="analytics-stat">
+          <span class="analytics-stat-value" id="a-dominant-guna">—</span>
+          <span class="analytics-stat-label">Dominant Guna</span>
+        </div>
+        <div class="analytics-stat">
+          <span class="analytics-stat-value" id="a-dominant-state">—</span>
+          <span class="analytics-stat-label">Primary State</span>
         </div>
       </div>
 
-      <!-- Avg bands -->
+      <!-- Gunas breakdown -->
       <div class="analytics-section">
-        <h3 class="analytics-section-title">Average Band Powers</h3>
-        <div id="a-avg-bands" class="a-bands-grid"></div>
+        <div class="analytics-section-title">Trigunas — Session Average</div>
+        <div class="analytics-gunas-bars">
+          <div class="analytics-guna-row">
+            <span class="guna-label sattva-label-text">☀ Sattva</span>
+            <div class="analytics-bar-bg">
+              <div class="analytics-bar sattva-bar" id="a-bar-sattva"></div>
+            </div>
+            <span class="guna-pct" id="a-pct-sattva">—</span>
+          </div>
+          <div class="analytics-guna-row">
+            <span class="guna-label rajas-label-text">🔥 Rajas</span>
+            <div class="analytics-bar-bg">
+              <div class="analytics-bar rajas-bar" id="a-bar-rajas"></div>
+            </div>
+            <span class="guna-pct" id="a-pct-rajas">—</span>
+          </div>
+          <div class="analytics-guna-row">
+            <span class="guna-label tamas-label-text">🌑 Tamas</span>
+            <div class="analytics-bar-bg">
+              <div class="analytics-bar tamas-bar" id="a-bar-tamas"></div>
+            </div>
+            <span class="guna-pct" id="a-pct-tamas">—</span>
+          </div>
+        </div>
       </div>
 
-      <!-- Timeline -->
-      <div class="analytics-section">
-        <h3 class="analytics-section-title">Session Timeline</h3>
-        <p class="analytics-hint">Consecutive epochs in the same Chitta Bhumi state are grouped into phases.</p>
-        <div id="a-timeline" class="a-timeline"></div>
+      <!-- State Breakdown -->
+      <div class="analytics-section analytics-two-col">
+        <div>
+          <div class="analytics-section-title">Chitta Bhumi Distribution</div>
+          <div id="a-state-breakdown" class="analytics-breakdown-list"></div>
+        </div>
+        <div>
+          <div class="analytics-section-title">Swara Distribution</div>
+          <div id="a-swara-breakdown" class="analytics-breakdown-list"></div>
+        </div>
       </div>
-    </div>
-  </div>
+
+      <!-- Band Powers Average -->
+      <div class="analytics-section">
+        <div class="analytics-section-title">Average Band Powers</div>
+        <div class="analytics-bands-row" id="a-avg-bands"></div>
+      </div>
+
+      <!-- Timeline of phases -->
+      <div class="analytics-section">
+        <div class="analytics-section-title">Session Timeline</div>
+        <p class="analytics-timeline-hint">Consecutive epochs in the same Chitta Bhumi state are grouped into phases.</p>
+        <div id="a-timeline" class="analytics-timeline"></div>
+      </div>
+
+
+      <!-- Session Notes (admin bug fix — notes now visible in analytics modal) -->
+      <div class="analytics-section" id="a-notes-section">
+        <div class="analytics-section-title">Session Notes</div>
+        <div id="a-notes-content" class="analytics-notes-content">
+          <em class="analytics-notes-empty">No notes recorded for this session.</em>
+        </div>
+      </div>
+
+      <!-- Epoch Replay Player -->
+      <div class="analytics-section" id="a-replay-section">
+        <div class="analytics-section-title">Epoch Replay</div>
+        <p class="analytics-timeline-hint">Step through recorded epochs to see how the EEG state evolved over time.</p>
+        <div class="replay-player">
+          <div class="replay-controls">
+            <button class="btn btn-ghost btn-sm replay-btn" id="replay-prev" title="Previous">⏮</button>
+            <button class="btn btn-primary btn-sm replay-btn" id="replay-play-pause">▶ Play</button>
+            <button class="btn btn-ghost btn-sm replay-btn" id="replay-next" title="Next">⏭</button>
+          </div>
+          <div class="replay-track">
+            <input type="range" id="replay-slider" class="replay-slider" min="0" max="0" value="0" />
+          </div>
+          <div class="replay-meta">
+            <span id="replay-epoch-label">—</span>
+            <span id="replay-time-label" class="replay-time">—</span>
+          </div>
+          <div class="replay-state-display" id="replay-state-display" style="display:none">
+            <div class="replay-state-row">
+              <span class="replay-state-key">State</span>
+              <span class="replay-state-val" id="replay-state-val">—</span>
+            </div>
+            <div class="replay-state-row">
+              <span class="replay-state-key">Swara</span>
+              <span class="replay-state-val" id="replay-swara-val">—</span>
+            </div>
+            <div class="replay-state-row">
+              <span class="replay-state-key">Dominant Guna</span>
+              <span class="replay-state-val" id="replay-guna-val">—</span>
+            </div>
+            <div class="replay-state-row">
+              <span class="replay-state-key">Alpha Power</span>
+              <span class="replay-state-val" id="replay-alpha-val">—</span>
+            </div>
+          </div>
+          <div id="replay-no-data" class="replay-no-data">No epoch data available for this session.</div>
+        </div>
+      </div>
+
+    </div><!-- /analytics-content -->
+  </div><!-- /analytics-panel -->
 </div>
 
 <script src="app.js"></script>
