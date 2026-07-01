@@ -73,6 +73,16 @@ function requireAdmin(req, res, next) {
   next();
 }
 
+// Elevated = admin OR co-admin (everything except user management)
+function requireElevated(req, res, next) {
+  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.session.role !== 'admin' && req.session.role !== 'co-admin')
+    return res.status(403).json({ error: 'Insufficient permissions' });
+  next();
+}
+
+const VALID_ROLES = ['user', 'admin', 'co-admin'];
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 const mapUser = r => ({
   id: r.id,
@@ -216,11 +226,31 @@ router.put('/users/:id/password', requireAdmin, async (req, res) => {
   }
 });
 
+router.put('/users/:id/role', requireAdmin, async (req, res) => {
+  try {
+    const id   = parseInt(req.params.id, 10);
+    const { role } = req.body;
+    if (!role || !VALID_ROLES.includes(role))
+      return res.status(400).json({ error: `Role must be one of: ${VALID_ROLES.join(', ')}` });
+    if (req.session.userId === id)
+      return res.status(400).json({ error: 'Cannot change your own role' });
+    const { rows } = await pool.query(
+      'UPDATE users SET role = $1 WHERE id = $2 RETURNING id, username, role, created_at',
+      [role, id]
+    );
+    if (!rows[0]) return res.status(404).json({ error: 'User not found' });
+    res.json(mapUser(rows[0]));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── EEG Sessions ──────────────────────────────────────────────────────────────
 router.get('/sessions', requireAuth, async (req, res) => {
   try {
     let rows;
-    if (req.session.role === 'admin') {
+    const isElevated = req.session.role === 'admin' || req.session.role === 'co-admin';
+    if (isElevated) {
       ({ rows } = await pool.query(
         `SELECT s.*, u.username
            FROM eeg_sessions s
@@ -262,7 +292,8 @@ router.post('/sessions/:id/end', requireAuth, async (req, res) => {
     const sessionId = parseInt(req.params.id, 10);
     const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]);
     if (!sess) return res.status(404).json({ error: 'Session not found' });
-    if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
+    const isElevated = req.session.role === 'admin' || req.session.role === 'co-admin';
+    if (!isElevated && sess.user_id !== req.session.userId)
       return res.status(403).json({ error: 'Forbidden' });
 
     const now = new Date();
@@ -282,7 +313,8 @@ router.get('/sessions/:id/notes', requireAuth, async (req, res) => {
     const sessionId = parseInt(req.params.id, 10);
     const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]);
     if (!sess) return res.status(404).json({ error: 'Session not found' });
-    if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
+    const isElevated = req.session.role === 'admin' || req.session.role === 'co-admin';
+    if (!isElevated && sess.user_id !== req.session.userId)
       return res.status(403).json({ error: 'Forbidden' });
 
     const { rows } = await pool.query('SELECT * FROM session_notes WHERE session_id = $1', [sessionId]);
@@ -299,7 +331,8 @@ router.put('/sessions/:id/notes', requireAuth, async (req, res) => {
 
     const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]);
     if (!sess) return res.status(404).json({ error: 'Session not found' });
-    if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
+    const isElevated = req.session.role === 'admin' || req.session.role === 'co-admin';
+    if (!isElevated && sess.user_id !== req.session.userId)
       return res.status(403).json({ error: 'Forbidden' });
 
     const { rows } = await pool.query(
@@ -338,7 +371,7 @@ router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
     // Verify session ownership
     const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]);
     if (!sess) return res.status(404).json({ error: 'Session not found' });
-    if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
+    if (!(req.session.role === 'admin' || req.session.role === 'co-admin') && sess.user_id !== req.session.userId)
       return res.status(403).json({ error: 'Forbidden' });
 
     const {
@@ -403,7 +436,7 @@ router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
       const sessionId = parseInt(req.params.id, 10);
       const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]);
       if (!sess) return res.status(404).json({ error: 'Session not found' });
-      if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
+      if (!(req.session.role === 'admin' || req.session.role === 'co-admin') && sess.user_id !== req.session.userId)
         return res.status(403).json({ error: 'Forbidden' });
       const { rows } = await pool.query(
         'SELECT * FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC, recorded_at ASC',
@@ -450,7 +483,7 @@ router.get('/sessions/:id/analytics', requireAuth, async (req, res) => {
       [sessionId]
     );
     if (!sess) return res.status(404).json({ error: 'Session not found' });
-    if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
+    if (!(req.session.role === 'admin' || req.session.role === 'co-admin') && sess.user_id !== req.session.userId)
       return res.status(403).json({ error: 'Forbidden' });
 
     // Fetch all epochs ordered by epoch_num
@@ -618,7 +651,7 @@ function finalizePhase(p) {
 }
 
 // ── Admin: sessions grouped by user ──────────────────────────────────────────
-router.get('/admin/sessions/by-user', requireAdmin, async (_req, res) => {
+router.get('/admin/sessions/by-user', requireElevated, async (_req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT s.id, s.user_id, u.username, s.name,
