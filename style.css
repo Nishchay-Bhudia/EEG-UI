@@ -782,3 +782,45 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); min-
   .timeline-phase { flex-direction: column; gap: 6px; }
   .timeline-time  { min-width: auto; }
 }
+
+
+  /* ─── VITALS CARDS (SpO₂ / Heart Rate) ──────────────────── */
+  .vitals-card {
+    display: flex;
+    flex-direction: column;
+    gap: 14px;
+  }
+
+  .vital-display {
+    display: flex;
+    align-items: baseline;
+    gap: 8px;
+  }
+
+  .vital-value {
+    font-family: var(--font-serif);
+    font-size: 52px;
+    font-weight: 400;
+    color: var(--text);
+    line-height: 1;
+    letter-spacing: -0.03em;
+    transition: color var(--transition);
+  }
+
+  .vital-unit {
+    font-size: 15px;
+    color: var(--text-muted);
+    font-weight: 500;
+    letter-spacing: 0.04em;
+    align-self: flex-end;
+    padding-bottom: 6px;
+  }
+
+  .vital-sub {
+    font-size: 11px;
+    color: var(--text-muted);
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    margin-top: -6px;
+  }
+  
