@@ -151,7 +151,8 @@ function showMainApp() {
   $('user-display-name').textContent   = currentUser.username;
   $('user-menu-role').textContent      = currentUser.role;
 
-  $('btn-open-admin').style.display = currentUser.role === 'admin' ? '' : 'none';
+  const isElevated = currentUser.role === 'admin' || currentUser.role === 'co-admin';
+  $('btn-open-admin').style.display = isElevated ? '' : 'none';
 
   // Start canvas
   resizeCanvas();
@@ -172,8 +173,15 @@ function showAdminPage() {
   $('main-content').style.display = 'none';
   $('admin-page').style.display   = '';
 
-  // Load the active admin tab
-  openAdminTab(adminCurrentTab);
+  const isCoAdmin = currentUser.role === 'co-admin';
+
+  // Co-admins cannot access the Users tab — hide the button and force sessions
+  const usersTabBtn = document.querySelector('.admin-tab[data-tab="users"]');
+  if (usersTabBtn) usersTabBtn.style.display = isCoAdmin ? 'none' : '';
+
+  // Force co-admin to the Sessions tab
+  const targetTab = isCoAdmin ? 'sessions' : adminCurrentTab;
+  openAdminTab(targetTab);
 }
 
 // ── Login form ────────────────────────────────────────────────────────────────
@@ -277,6 +285,9 @@ qAll('.admin-tab').forEach(tab => {
 });
 
 function openAdminTab(tabName) {
+  // Co-admins are not allowed to view the users tab
+  if (tabName === 'users' && currentUser.role === 'co-admin') tabName = 'sessions';
+
   adminCurrentTab = tabName;
 
   qAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
@@ -355,15 +366,26 @@ async function loadAdminUsers() {
       return;
     }
     users.forEach(u => {
+      const isSelf = u.id === currentUser.id;
+      const roleSelector = !isSelf ? `
+        <select class="field-input field-input-xs" data-action="select-role" data-uid="${u.id}">
+          <option value="user"     ${u.role === 'user'     ? 'selected' : ''}>user</option>
+          <option value="co-admin" ${u.role === 'co-admin' ? 'selected' : ''}>co-admin</option>
+          <option value="admin"    ${u.role === 'admin'    ? 'selected' : ''}>admin</option>
+        </select>
+        <button class="btn btn-ghost btn-sm" data-action="change-role" data-uid="${u.id}">Apply</button>
+      ` : '';
+
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><strong>${escHtml(u.username)}</strong></td>
-        <td><span class="role-badge role-${u.role}">${escHtml(u.role)}</span></td>
+        <td><span class="role-badge role-${u.role.replace('-', '_')}">${escHtml(u.role)}</span></td>
         <td>${formatDate(u.createdAt)}</td>
         <td>
           <div class="table-actions">
+            ${roleSelector}
             <button class="btn btn-ghost btn-sm" data-action="reset-pw" data-uid="${u.id}">Reset PW</button>
-            ${u.id !== currentUser.id
+            ${!isSelf
               ? `<button class="btn btn-danger btn-sm" data-action="delete-user" data-uid="${u.id}">Delete</button>`
               : '<span style="font-size:11px;color:var(--text-muted)">(you)</span>'
             }
@@ -391,6 +413,19 @@ $('admin-users-tbody').addEventListener('click', async e => {
     if (!confirm('Delete this user? This cannot be undone.')) return;
     try {
       await api('DELETE', '/users/' + uid);
+      await loadAdminUsers();
+    } catch (err) {
+      alert('Error: ' + err.message);
+    }
+  } else if (action === 'change-role') {
+    // Find the matching select in the same row
+    const row    = btn.closest('tr');
+    const select = row.querySelector('[data-action="select-role"]');
+    if (!select) return;
+    const newRole = select.value;
+    if (!confirm(`Change this user's role to "${newRole}"?`)) return;
+    try {
+      await api('PUT', '/users/' + uid + '/role', { role: newRole });
       await loadAdminUsers();
     } catch (err) {
       alert('Error: ' + err.message);
