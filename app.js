@@ -67,10 +67,7 @@ const waveBuf  = new Float32Array(WAVE_LEN);
 let waveTail   = 0;
 let wavePhase  = 0;
 
-// BT Wizard state
-let btWizardPhase          = 'idle'; // idle | pairing | waiting | countdown | done | error
-let btWizardCountdownTimer = null;
-let btWizardQualityTimer   = null;
+// BT Wizard state removed — using direct connectBluetooth()
 
 // Replay Player state
 let replayEpochs              = [];
@@ -1065,12 +1062,12 @@ $('btn-demo').addEventListener('click', () => {
 // ── Bluetooth ─────────────────────────────────────────────────────────────────
 $('btn-bt-scan').addEventListener('click', () => {
   $('settings-overlay').classList.remove('open');
-  openBtWizard();
+  connectBluetooth();
 });
 $('btn-bt-disconnect').addEventListener('click', disconnectBluetooth);
 $('btn-bluetooth').addEventListener('click', () => {
   if (mode === 'bluetooth') disconnectBluetooth();
-  else openBtWizard();
+  else connectBluetooth();
 });
 
 async function connectBluetooth() {
@@ -1421,84 +1418,6 @@ function drawWave() {
   ctx.stroke();
 
   requestAnimationFrame(drawWave);
-}
-
-// ── BT Wizard ─────────────────────────────────────────────────────────────────
-function showBtWizardPhase(phase) {
-  btWizardPhase = phase;
-  ['idle', 'pairing', 'waiting', 'countdown', 'done', 'error'].forEach(p => {
-    const el = $('btwiz-phase-' + p);
-    if (el) el.style.display = (p === phase) ? '' : 'none';
-  });
-  const stepMap = { idle: 1, pairing: 1, waiting: 2, countdown: 3, done: 3, error: 1 };
-  const active  = stepMap[phase] || 1;
-  [1, 2, 3].forEach(n => {
-    const el = $('btwiz-step-' + n);
-    if (el) el.dataset.active = String(n === active);
-  });
-}
-
-function openBtWizard() {
-  showBtWizardPhase('idle');
-  $('bt-wizard-overlay').style.display = 'flex';
-}
-
-function closeBtWizard() {
-  $('bt-wizard-overlay').style.display = 'none';
-  clearTimeout(btWizardCountdownTimer);
-  clearInterval(btWizardQualityTimer);
-}
-
-$('btn-close-bt-wizard').addEventListener('click', closeBtWizard);
-$('btn-btwiz-done').addEventListener('click', closeBtWizard);
-$('btn-btwiz-retry').addEventListener('click', () => showBtWizardPhase('idle'));
-
-$('btn-btwiz-start').addEventListener('click', async () => {
-  showBtWizardPhase('pairing');
-  try {
-    await connectBluetooth();
-    const deviceName = btDevice?.name || 'Muse';
-    $('btwiz-device-name').textContent = deviceName;
-    showBtWizardPhase('waiting');
-    startBtWizardQualityCheck();
-  } catch (err) {
-    $('btwiz-error-msg').textContent = err.message || 'Bluetooth pairing failed. Try again.';
-    showBtWizardPhase('error');
-  }
-});
-
-function startBtWizardQualityCheck() {
-  let ticks = 0;
-  clearInterval(btWizardQualityTimer);
-  btWizardQualityTimer = setInterval(() => {
-    ticks++;
-    // Read the quality value already set in the UI by applyReading / setStatus
-    const qualText = $('val-quality')?.textContent || '';
-    const isGood   = qualText.includes('✓') || qualText === 'Good' || qualText === 'OK';
-    const bar      = $('btwiz-quality-bar');
-    const lbl      = $('btwiz-quality-label');
-    if (bar) bar.style.width = Math.min(ticks * 12, 90) + '%';
-    if (lbl) lbl.textContent = isGood ? 'Signal good!' : 'Adjust headband for better contact…';
-    if (isGood || ticks >= 8) {
-      clearInterval(btWizardQualityTimer);
-      if (bar) bar.style.width = '100%';
-      startBtWizardCountdown();
-    }
-  }, 1000);
-}
-
-function startBtWizardCountdown() {
-  let count = 3;
-  if ($('btwiz-countdown-number')) $('btwiz-countdown-number').textContent = count;
-  showBtWizardPhase('countdown');
-  btWizardCountdownTimer = setInterval(() => {
-    count--;
-    if ($('btwiz-countdown-number')) $('btwiz-countdown-number').textContent = count;
-    if (count <= 0) {
-      clearInterval(btWizardCountdownTimer);
-      showBtWizardPhase('done');
-    }
-  }, 1000);
 }
 
 // ── Replay Player ─────────────────────────────────────────────────────────────
