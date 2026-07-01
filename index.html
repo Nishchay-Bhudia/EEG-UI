@@ -3,724 +3,194 @@
 <head>
   <meta charset="UTF-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>EEG Dev Testing</title>
+  <title>EEG DEV TESTING</title>
+  <link rel="stylesheet" href="style.css" />
   <style>
-    /* ── Reset & base ── */
-    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+/* ── BT Wizard Modal ─────────────────────────────────────────────────── */
+.bt-wizard-overlay{position:fixed;inset:0;background:rgba(0,0,0,.55);display:flex;align-items:center;justify-content:center;z-index:900}
+.bt-wizard-panel{background:var(--panel);border:1px solid var(--border);border-radius:16px;width:440px;max-width:95vw;overflow:hidden;box-shadow:0 24px 64px rgba(0,0,0,.35)}
+.bt-wizard-header{display:flex;align-items:center;justify-content:space-between;padding:16px 20px;border-bottom:1px solid var(--border)}
+.bt-wizard-title{font-size:16px;font-weight:600;margin:0;color:var(--text)}
+.bt-wizard-body{padding:32px 24px;min-height:200px;display:flex;flex-direction:column;align-items:center;text-align:center}
+.btwiz-phase{display:flex;flex-direction:column;align-items:center;gap:12px;width:100%}
+.btwiz-icon{font-size:48px;line-height:1}
+.btwiz-icon-pulse{animation:btwiz-pulse 1.6s ease-in-out infinite}
+@keyframes btwiz-pulse{0%,100%{transform:scale(1);opacity:1}50%{transform:scale(1.12);opacity:.7}}
+.btwiz-heading{font-size:18px;font-weight:600;color:var(--text);margin:0}
+.btwiz-desc{font-size:13px;color:var(--text-muted);line-height:1.5;margin:0;max-width:320px}
+.btwiz-spinner{width:48px;height:48px;border:3px solid var(--border);border-top-color:var(--accent);border-radius:50%;animation:btwiz-spin .8s linear infinite}
+@keyframes btwiz-spin{to{transform:rotate(360deg)}}
+.btwiz-quality-bar-bg{width:100%;max-width:280px;height:8px;background:var(--border);border-radius:4px;overflow:hidden;margin-top:4px}
+.btwiz-quality-bar{height:100%;background:var(--accent);border-radius:4px;transition:width .5s ease;width:0}
+.btwiz-quality-label{font-size:12px;color:var(--text-muted)}
+.btwiz-countdown-ring{width:80px;height:80px;border-radius:50%;border:4px solid var(--accent);display:flex;align-items:center;justify-content:center}
+.btwiz-countdown-ring span{font-size:36px;font-weight:700;color:var(--accent)}
+.btwiz-steps{display:flex;align-items:center;justify-content:center;gap:4px;padding:14px 24px;border-top:1px solid var(--border)}
+.btwiz-step{font-size:11px;color:var(--text-muted);padding:4px 12px;border-radius:20px;border:1px solid var(--border)}
+.btwiz-step[data-active="true"]{color:var(--accent);border-color:var(--accent);font-weight:600}
+.btwiz-step-line{flex:1;height:1px;background:var(--border)}
 
-    :root {
-      --bg:          #F7F6F2;
-      --surface:     #FFFFFF;
-      --surface-2:   #F0EFEA;
-      --border:      #E4E2DC;
-      --text:        #1A1814;
-      --text-muted:  #7A7670;
-      --accent:      #D97757;
-      --accent-dim:  rgba(217,119,87,.15);
-      --shadow:      0 2px 12px rgba(0,0,0,.08);
-      --shadow-lg:   0 8px 32px rgba(0,0,0,.14);
-      --radius:      12px;
-      --radius-sm:   8px;
+/* ── Analytics Notes ─────────────────────────────────────────────────── */
+.analytics-notes-content{font-size:13px;color:var(--text);line-height:1.7;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:12px 16px;min-height:48px;white-space:pre-wrap;word-break:break-word}
+.analytics-notes-empty{color:var(--text-muted);font-style:italic}
 
-      /* State colours */
-      --kshipta:   #C75C5C;
-      --vikshipta: #D9A04A;
-      --ekagra:    #4A8FD9;
-      --niruddha:  #56A67A;
-
-      /* Swara */
-      --ida:       #6B8CBA;
-      --pingala:   #D97757;
-      --sushumna:  #7BB87B;
-
-      /* Bands */
-      --delta: #8B7BAB;
-      --theta: #5B9BD5;
-      --alpha: #5BAB7A;
-      --beta:  #D9A04A;
-      --gamma: #D95B5B;
-
-      /* Gunas */
-      --sattva: #7BB87B;
-      --rajas:  #D97757;
-      --tamas:  #8B7BAB;
-    }
-
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', system-ui, sans-serif;
-      background: var(--bg);
-      color: var(--text);
-      min-height: 100vh;
-      font-size: 14px;
-      line-height: 1.5;
-    }
-
-    /* ── Login screen ── */
-    #login-screen {
-      position: fixed; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      background: var(--bg); z-index: 1000;
-    }
-    .login-card {
-      background: var(--surface);
-      border: 1px solid var(--border);
-      border-radius: var(--radius);
-      padding: 40px;
-      width: 340px;
-      box-shadow: var(--shadow-lg);
-    }
-    .login-card h1 { font-size: 20px; font-weight: 700; margin-bottom: 4px; }
-    .login-card .login-sub { color: var(--text-muted); font-size: 13px; margin-bottom: 28px; }
-    .form-field { margin-bottom: 14px; }
-    .form-field label { display: block; font-size: 12px; font-weight: 600; color: var(--text-muted); margin-bottom: 5px; letter-spacing:.05em; text-transform:uppercase; }
-    .form-field input {
-      width: 100%; padding: 10px 12px;
-      border: 1px solid var(--border); border-radius: var(--radius-sm);
-      background: var(--bg); color: var(--text); font-size: 14px; outline: none;
-      transition: border-color .15s;
-    }
-    .form-field input:focus { border-color: var(--accent); }
-    #login-error { color: var(--gamma); font-size: 13px; margin-top: 8px; display: none; }
-    .btn-primary {
-      width: 100%; padding: 11px; background: var(--accent); color: #fff;
-      border: none; border-radius: var(--radius-sm); font-size: 14px;
-      font-weight: 600; cursor: pointer; margin-top: 6px; transition: opacity .15s;
-    }
-    .btn-primary:hover { opacity: .88; }
-    .btn-primary:disabled { opacity: .5; cursor: not-allowed; }
-
-    /* ── Main header ── */
-    #main-header {
-      position: sticky; top: 0; z-index: 200;
-      background: rgba(247,246,242,.85); backdrop-filter: blur(10px);
-      border-bottom: 1px solid var(--border);
-      display: flex; align-items: center; padding: 0 20px; height: 52px; gap: 12px;
-    }
-    .header-brand { font-weight: 700; font-size: 15px; flex: 1; }
-    .btn-icon {
-      background: none; border: 1px solid var(--border); border-radius: 8px;
-      padding: 6px 10px; cursor: pointer; font-size: 13px; color: var(--text);
-      transition: background .15s;
-    }
-    .btn-icon:hover { background: var(--surface-2); }
-    .btn-icon.bt-active { background: #E8F5EE; border-color: var(--niruddha); color: var(--niruddha); }
-
-    /* User menu */
-    .user-menu-wrap { position: relative; }
-    #btn-user-menu {
-      display: flex; align-items: center; gap: 8px; padding: 5px 10px;
-      background: none; border: 1px solid var(--border); border-radius: 8px; cursor: pointer;
-    }
-    .user-avatar {
-      width: 26px; height: 26px; border-radius: 50%; background: var(--accent);
-      color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center;
-    }
-    #user-display-name { font-size: 13px; font-weight: 600; }
-    #user-dropdown {
-      position: absolute; top: calc(100% + 6px); right: 0;
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius-sm); box-shadow: var(--shadow-lg);
-      min-width: 160px; display: none; z-index: 300;
-    }
-    .dropdown-item { display: block; padding: 9px 14px; font-size: 13px; cursor: pointer; }
-    .dropdown-item:hover { background: var(--surface-2); }
-    #user-menu-role { font-size: 11px; color: var(--text-muted); padding: 6px 14px 2px; }
-
-    /* ── Settings overlay ── */
-    #settings-overlay {
-      position: fixed; inset: 0; z-index: 400;
-      background: rgba(0,0,0,.35); backdrop-filter: blur(3px);
-      display: flex; align-items: center; justify-content: center;
-      opacity: 0; pointer-events: none; transition: opacity .2s;
-    }
-    #settings-overlay.open { opacity: 1; pointer-events: all; }
-    .settings-panel {
-      background: var(--surface); border-radius: var(--radius);
-      padding: 28px; width: min(480px,92vw); box-shadow: var(--shadow-lg);
-    }
-    .settings-header { display: flex; align-items: center; margin-bottom: 20px; }
-    .settings-header h2 { flex: 1; font-size: 16px; }
-    .settings-close { background: none; border: none; font-size: 18px; cursor: pointer; color: var(--text-muted); }
-    .settings-section { margin-bottom: 20px; }
-    .settings-section h3 { font-size: 12px; font-weight: 700; color: var(--text-muted); letter-spacing:.06em; text-transform:uppercase; margin-bottom: 10px; }
-    .bt-device-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-    #bt-device-name { flex: 1; font-size: 13px; }
-    .url-row { display: flex; gap: 8px; margin-bottom: 6px; }
-    .url-row input { flex: 1; padding: 9px 11px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--bg); color: var(--text); font-size: 13px; }
-    #test-msg { font-size: 12px; margin-top: 4px; display: none; }
-    .settings-docs { background: var(--bg); border-radius: var(--radius-sm); padding: 12px; margin-top: 10px; font-size: 12px; color: var(--text-muted); }
-    .settings-docs code { font-family: monospace; font-size: 11px; }
-    pre { background: var(--surface-2); border-radius: 6px; padding: 10px; font-size: 11px; overflow-x: auto; }
-    .btn-sm {
-      padding: 5px 10px; font-size: 12px; border: 1px solid var(--border);
-      border-radius: 6px; background: var(--surface); cursor: pointer; transition: background .15s;
-    }
-    .btn-sm:hover { background: var(--surface-2); }
-    .btn-sm.btn-danger { border-color: var(--gamma); color: var(--gamma); }
-    .btn-sm.btn-danger:hover { background: #FFF0F0; }
-
-    /* ── Main content ── */
-    #main-content { display: flex; gap: 16px; padding: 16px; max-width: 1400px; margin: 0 auto; }
-
-    /* ── Stats bar ── */
-    .stats-bar {
-      background: var(--surface); border: 1px solid var(--border); border-radius: var(--radius);
-      padding: 12px 16px; display: flex; flex-wrap: wrap; gap: 16px; margin-bottom: 16px;
-    }
-    .stat { display: flex; flex-direction: column; }
-    .stat-label { font-size: 10px; font-weight: 700; color: var(--text-muted); letter-spacing:.06em; text-transform:uppercase; }
-    .stat-value { font-size: 15px; font-weight: 700; font-variant-numeric: tabular-nums; }
-
-    /* Status dot */
-    .status-row { display: flex; align-items: center; gap: 8px; }
-    .status-dot {
-      width: 8px; height: 8px; border-radius: 50%;
-      background: var(--text-muted); flex-shrink: 0;
-      transition: background .3s;
-    }
-    .status-dot.bluetooth { background: var(--niruddha); box-shadow: 0 0 6px var(--niruddha); animation: pulse 2s infinite; }
-    .status-dot.connected { background: var(--niruddha); }
-    .status-dot.demo { background: var(--delta); box-shadow: 0 0 6px var(--delta); animation: pulse 2s infinite; }
-    .status-dot.waking  { background: var(--vikshipta); animation: pulse 1.2s infinite; }
-    .status-dot.error   { background: var(--kshipta); }
-    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:.4} }
-
-    /* ── Left column ── */
-    .col-left { width: 200px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; }
-    .col-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 12px; }
-    .col-right { width: 240px; flex-shrink: 0; display: flex; flex-direction: column; gap: 12px; }
-
-    /* ── Cards ── */
-    .card {
-      background: var(--surface); border: 1px solid var(--border);
-      border-radius: var(--radius); padding: 16px;
-    }
-    .card-title {
-      font-size: 10px; font-weight: 700; color: var(--text-muted);
-      letter-spacing:.08em; text-transform: uppercase; margin-bottom: 12px;
-    }
-
-    /* ── Chitta Bhumi card ── */
-    .chitta-state-large { font-size: 26px; font-weight: 800; }
-    .chitta-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-    .depth-scale { margin: 12px 0 6px; height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
-    #depth-fill { height: 100%; border-radius: 3px; transition: width .6s, background .6s; }
-    .depth-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); }
-    .prob-row { display: flex; align-items: center; gap: 8px; margin-top: 6px; }
-    .prob-name { font-size: 12px; width: 70px; }
-    .prob-bar-wrap { flex: 1; height: 5px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
-    .prob-bar { height: 100%; border-radius: 2px; transition: width .6s; }
-    #bar-kshipta   { background: var(--kshipta); }
-    #bar-vikshipta { background: var(--vikshipta); }
-    #bar-ekagra    { background: var(--ekagra); }
-    #bar-niruddha  { background: var(--niruddha); }
-    .prob-pct { font-size: 11px; font-variant-numeric: tabular-nums; width: 36px; text-align: right; }
-
-    /* ── Swara card ── */
-    .swara-glyphs { display: flex; gap: 12px; justify-content: center; margin-bottom: 12px; }
-    .swara-glyph {
-      display: flex; flex-direction: column; align-items: center; gap: 4px;
-      padding: 8px 12px; border-radius: var(--radius-sm); border: 1px solid var(--border);
-      cursor: default; transition: all .3s; flex: 1; text-align: center;
-    }
-    .swara-glyph .glyph-icon { font-size: 20px; }
-    .swara-glyph .glyph-name { font-size: 12px; font-weight: 700; }
-    .swara-glyph .glyph-sub  { font-size: 10px; color: var(--text-muted); }
-    .swara-glyph.active-ida      { background: rgba(107,140,186,.15); border-color: var(--ida); }
-    .swara-glyph.active-pingala  { background: rgba(217,119,87,.15);  border-color: var(--pingala); }
-    .swara-glyph.active-sushumna { background: rgba(123,184,123,.15); border-color: var(--sushumna); }
-
-    .asym-bar { position: relative; height: 6px; background: var(--surface-2); border-radius: 3px; margin: 8px 0; }
-    #asym-fill { position: absolute; top: 0; bottom: 0; border-radius: 3px; transition: all .5s; }
-    #asym-thumb {
-      position: absolute; top: 50%; width: 12px; height: 12px; border-radius: 50%;
-      transform: translate(-50%,-50%); transition: left .5s, background .5s;
-    }
-    .asym-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--text-muted); }
-
-    /* ── Band powers ── */
-    .band-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-    .band-sym  { font-size: 15px; font-weight: 700; width: 20px; }
-    .band-info { display: flex; flex-direction: column; width: 80px; }
-    .band-name { font-size: 11px; }
-    .band-hz   { font-size: 10px; color: var(--text-muted); }
-    .band-bar-wrap { flex: 1; height: 5px; background: var(--surface-2); border-radius: 2px; overflow: hidden; }
-    .band-bar { height: 100%; border-radius: 2px; transition: width .6s; }
-    #bar-delta { background: var(--delta); }
-    #bar-theta { background: var(--theta); }
-    #bar-alpha { background: var(--alpha); }
-    #bar-beta  { background: var(--beta);  }
-    #bar-gamma { background: var(--gamma); }
-    .band-val { font-size: 11px; font-variant-numeric: tabular-nums; width: 36px; text-align: right; }
-
-    /* ── Trigunas ── */
-    .gunas-dominant-row { display: flex; align-items: center; gap: 8px; margin-bottom: 10px; }
-    .gunas-dom-label { font-size: 16px; font-weight: 800; }
-    .gunas-note { font-size: 11px; color: var(--text-muted); }
-    .guna-row { display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
-    .guna-sym  { width: 22px; font-size: 14px; }
-    .guna-name { width: 60px; font-size: 12px; font-weight: 600; }
-    .guna-sub  { width: 50px; font-size: 10px; color: var(--text-muted); }
-    .guna-bar-wrap { flex: 1; height: 6px; background: var(--surface-2); border-radius: 3px; overflow: hidden; }
-    .guna-bar  { height: 100%; border-radius: 3px; transition: width .6s; }
-    #bar-sattva { background: var(--sattva); }
-    #bar-rajas  { background: var(--rajas); }
-    #bar-tamas  { background: var(--tamas); }
-    .guna-val  { font-size: 11px; font-variant-numeric: tabular-nums; width: 36px; text-align: right; }
-
-    /* ── Tattva flags ── */
-    .tattva-flag {
-      display: inline-block; padding: 3px 8px; border-radius: 999px;
-      font-size: 11px; font-weight: 600; margin: 2px; border: 1px solid;
-    }
-    .tattva-activation { background: rgba(91,171,122,.15); border-color: var(--alpha); color: var(--alpha); }
-    .pratyahara        { background: rgba(91,155,213,.15); border-color: var(--theta); color: var(--theta); }
-    .turiya            { background: rgba(139,123,171,.15); border-color: var(--delta); color: var(--delta); }
-    .gamma-spike       { background: rgba(217,91,91,.15);  border-color: var(--gamma); color: var(--gamma); }
-    .tattva-other      { background: var(--surface-2); border-color: var(--border); color: var(--text-muted); }
-
-    /* ── Session management ── */
-    .session-name-row { display: flex; align-items: center; gap: 8px; font-size: 13px; font-weight: 600; }
-    .session-timer    { font-size: 13px; font-variant-numeric: tabular-nums; color: var(--text-muted); }
-    .session-btn-row  { display: flex; gap: 8px; margin-top: 10px; }
-    .session-notes-wrap { margin-top: 12px; }
-    .session-notes-wrap label { font-size: 11px; color: var(--text-muted); display: block; margin-bottom: 4px; }
-    #session-notes {
-      width: 100%; height: 80px; resize: vertical;
-      padding: 8px; border: 1px solid var(--border); border-radius: var(--radius-sm);
-      background: var(--bg); color: var(--text); font-size: 12px; font-family: inherit;
-    }
-
-    /* ── History ── */
-    .history-header { display: flex; align-items: center; gap: 8px; margin-bottom: 8px; }
-    .history-header h3 { flex: 1; font-size: 12px; font-weight: 700; text-transform: uppercase; letter-spacing:.05em; color: var(--text-muted); }
-    #history-empty { font-size: 12px; color: var(--text-muted); }
-    .history-item {
-      display: flex; align-items: center; gap: 10px;
-      padding: 8px 0; border-bottom: 1px solid var(--border);
-    }
-    .history-item:last-child { border-bottom: none; }
-    .history-item-info { flex: 1; min-width: 0; }
-    .history-name { display: block; font-size: 13px; font-weight: 600; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
-    .history-date { display: block; font-size: 11px; color: var(--text-muted); }
-    .history-dur  { display: block; font-size: 11px; color: var(--text-muted); }
-
-    /* ── EEG Canvas ── */
-    .canvas-wrap { border-radius: var(--radius-sm); overflow: hidden; }
-    #eeg-canvas { display: block; width: 100%; height: 110px; }
-
-    /* ── Controls row ── */
-    .controls-row { display: flex; gap: 8px; align-items: center; }
-
-    /* ── Admin page ── */
-    #admin-page { padding: 20px; max-width: 1000px; margin: 0 auto; }
-    #admin-page h1 { font-size: 22px; font-weight: 800; margin-bottom: 16px; }
-    .admin-tabs { display: flex; gap: 0; border-bottom: 2px solid var(--border); margin-bottom: 20px; }
-    .admin-tab {
-      padding: 10px 20px; font-size: 13px; font-weight: 600; cursor: pointer;
-      border-bottom: 2px solid transparent; margin-bottom: -2px; color: var(--text-muted);
-      transition: all .15s;
-    }
-    .admin-tab.active { color: var(--accent); border-bottom-color: var(--accent); }
-
-    .admin-section-header { display: flex; align-items: center; gap: 10px; margin-bottom: 14px; }
-    .admin-section-header h2 { flex: 1; font-size: 16px; font-weight: 700; }
-    .admin-form {
-      background: var(--surface-2); border-radius: var(--radius-sm); padding: 14px; margin-bottom: 14px;
-    }
-    .admin-form .form-row { display: flex; gap: 8px; flex-wrap: wrap; }
-    .admin-form input, .admin-form select {
-      padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px;
-      background: var(--surface); color: var(--text); font-size: 13px; flex: 1; min-width: 120px;
-    }
-    .admin-error { color: var(--kshipta); font-size: 12px; margin-top: 6px; display: none; }
-
-    table { width: 100%; border-collapse: collapse; }
-    th { font-size: 11px; font-weight: 700; color: var(--text-muted); text-align: left; padding: 6px 8px; border-bottom: 2px solid var(--border); text-transform: uppercase; letter-spacing:.04em; }
-    td { padding: 8px; border-bottom: 1px solid var(--border); font-size: 13px; vertical-align: middle; }
-    tr:hover td { background: var(--surface-2); }
-    .role-badge { display: inline-block; padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 700; background: var(--accent-dim); color: var(--accent); }
-
-    .sessions-search { margin-bottom: 10px; }
-    .sessions-search input { width: 100%; max-width: 300px; padding: 7px 10px; border: 1px solid var(--border); border-radius: 6px; background: var(--bg); color: var(--text); font-size: 13px; }
-
-    /* ── Analytics overlay ── */
-    #analytics-overlay {
-      position: fixed; inset: 0; z-index: 500;
-      background: rgba(0,0,0,.45); backdrop-filter: blur(4px);
-      display: none; align-items: flex-start; justify-content: center;
-      padding: 30px 16px; overflow-y: auto;
-    }
-    .analytics-panel {
-      background: var(--surface); border-radius: var(--radius); width: min(800px,100%);
-      box-shadow: var(--shadow-lg); position: relative;
-    }
-    .analytics-header {
-      display: flex; align-items: flex-start; gap: 12px;
-      padding: 20px 20px 0; border-bottom: 1px solid var(--border); padding-bottom: 14px;
-    }
-    .analytics-header-text { flex: 1; }
-    .analytics-header h2 { font-size: 18px; font-weight: 800; }
-    .analytics-header p { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
-    #btn-close-analytics { background: none; border: 1px solid var(--border); border-radius: 6px; padding: 5px 10px; cursor: pointer; font-size: 13px; color: var(--text-muted); }
-    #analytics-loading { padding: 40px; text-align: center; color: var(--text-muted); }
-    #analytics-error { padding: 20px; color: var(--kshipta); }
-    #analytics-content { padding: 20px; }
-
-    .analytics-stat-grid {
-      display: grid; grid-template-columns: repeat(4,1fr); gap: 10px; margin-bottom: 18px;
-    }
-    .analytics-stat {
-      background: var(--bg); border-radius: var(--radius-sm); padding: 12px;
-      text-align: center;
-    }
-    .analytics-stat-label { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing:.05em; margin-bottom: 4px; }
-    .analytics-stat-val { font-size: 20px; font-weight: 800; }
-
-    .analytics-grid { display: grid; grid-template-columns: 1fr 1fr; gap: 14px; margin-bottom: 14px; }
-    .analytics-card {
-      background: var(--bg); border-radius: var(--radius-sm); padding: 14px;
-    }
-    .analytics-card-title { font-size: 11px; font-weight: 700; text-transform: uppercase; color: var(--text-muted); letter-spacing:.05em; margin-bottom: 10px; }
-
-    /* Guna bars in analytics */
-    .ag-row { display: flex; align-items: center; gap: 8px; margin-bottom: 7px; }
-    .ag-label { width: 80px; font-size: 12px; }
-    .ag-bar-wrap { flex: 1; height: 6px; background: var(--surface); border-radius: 3px; overflow: hidden; }
-    .ag-bar { height: 100%; border-radius: 3px; transition: width .6s; }
-    .ag-sattva { background: var(--sattva); }
-    .ag-rajas   { background: var(--rajas); }
-    .ag-tamas   { background: var(--tamas); }
-    .ag-pct { font-size: 11px; width: 36px; text-align: right; }
-
-    .breakdown-item { display: flex; align-items: center; gap: 8px; margin-bottom: 5px; }
-    .breakdown-label { width: 80px; font-size: 12px; }
-    .breakdown-bar-wrap { flex: 1; height: 5px; background: var(--surface); border-radius: 2px; overflow: hidden; }
-    .breakdown-bar { height: 100%; border-radius: 2px; transition: width .6s; }
-    .breakdown-pct { font-size: 11px; width: 32px; text-align: right; }
-
-    .analytics-band-pill {
-      display: flex; align-items: center; gap: 6px;
-      background: var(--surface); border-radius: 6px; padding: 6px 10px; margin-bottom: 5px;
-    }
-
-    /* Timeline */
-    #a-timeline { margin-top: 4px; }
-    .timeline-phase {
-      border-left: 3px solid var(--border); padding: 8px 12px; margin-bottom: 6px;
-      border-radius: 0 var(--radius-sm) var(--radius-sm) 0; background: var(--bg);
-    }
-    .phase-Kshipta   { border-left-color: var(--kshipta); }
-    .phase-Vikshipta { border-left-color: var(--vikshipta); }
-    .phase-Ekagra    { border-left-color: var(--ekagra); }
-    .phase-Niruddha  { border-left-color: var(--niruddha); }
-    .phase-header { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; }
-    .phase-time  { font-size: 11px; color: var(--text-muted); }
-    .phase-state { font-size: 12px; font-weight: 700; }
-    .phase-depth { font-size: 11px; color: var(--text-muted); }
-    .phase-band-note { font-size: 11px; color: var(--text-muted); }
-    .phase-footer { display: flex; align-items: center; gap: 8px; margin-top: 4px; }
-    .triguna-badge { display: inline-block; padding: 1px 7px; border-radius: 999px; font-size: 11px; font-weight: 600; }
-    .tgb-sattva { background: rgba(123,184,123,.15); color: var(--sattva); }
-    .tgb-rajas  { background: rgba(217,119,87,.15);  color: var(--rajas); }
-    .tgb-tamas  { background: rgba(139,123,171,.15); color: var(--tamas); }
-    .phase-epoch-count { font-size: 11px; color: var(--text-muted); }
-
-    /* Session notes in analytics */
-    #a-notes-wrap { margin-top: 14px; }
-    .a-notes-card {
-      background: var(--bg); border-radius: var(--radius-sm); padding: 14px;
-    }
-    .a-notes-card .analytics-card-title { margin-bottom: 8px; }
-    #a-session-notes {
-      width: 100%; min-height: 80px; padding: 8px 10px;
-      border: 1px solid var(--border); border-radius: 6px;
-      background: var(--surface); color: var(--text); font-size: 13px;
-      font-family: inherit; resize: vertical; cursor: default;
-    }
-    .a-notes-hint { font-size: 11px; color: var(--text-muted); margin-top: 4px; }
-
-    /* ═══════════════════════════════════════════════════
-       REPLAY PLAYER
-    ═══════════════════════════════════════════════════ */
-    #replay-player {
-      margin-top: 18px;
-      background: #0f0f14;
-      border-radius: var(--radius);
-      padding: 18px 20px;
-      border: 1px solid rgba(255,255,255,.08);
-      box-shadow: 0 4px 24px rgba(0,0,0,.3);
-      display: none;
-    }
-    .replay-title {
-      font-size: 13px; font-weight: 700; color: rgba(255,255,255,.5);
-      text-transform: uppercase; letter-spacing: .1em; margin-bottom: 14px;
-    }
-    .replay-controls {
-      display: flex; align-items: center; gap: 10px; margin-bottom: 14px; flex-wrap: wrap;
-    }
-    .replay-btn {
-      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
-      color: #fff; border-radius: 8px; width: 40px; height: 40px;
-      display: flex; align-items: center; justify-content: center;
-      cursor: pointer; font-size: 16px; transition: background .15s; flex-shrink: 0;
-    }
-    .replay-btn:hover { background: rgba(255,255,255,.16); }
-    #replay-play {
-      width: 48px; height: 48px; font-size: 18px;
-      background: var(--accent); border-color: var(--accent);
-      border-radius: 50%;
-    }
-    #replay-play:hover { opacity: .85; }
-    #replay-speed {
-      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
-      color: #fff; border-radius: 8px; padding: 6px 10px; font-size: 13px; cursor: pointer;
-    }
-    #replay-speed option { background: #1a1a2e; color: #fff; }
-    .replay-timeline {
-      display: flex; align-items: center; gap: 10px;
-    }
-    .replay-time { font-size: 12px; color: rgba(255,255,255,.55); font-variant-numeric: tabular-nums; width: 40px; flex-shrink: 0; }
-    #replay-slider {
-      flex: 1; height: 4px; accent-color: var(--accent); cursor: pointer;
-      border-radius: 2px;
-    }
-    .replay-kbd-hint { font-size: 11px; color: rgba(255,255,255,.3); margin-top: 10px; }
-    kbd {
-      display: inline-block; padding: 1px 5px; border-radius: 3px;
-      background: rgba(255,255,255,.1); font-size: 11px;
-    }
-
-    /* ═══════════════════════════════════════════════════
-       BLUETOOTH WIZARD MODAL
-    ═══════════════════════════════════════════════════ */
-    #bt-wizard-overlay {
-      position: fixed; inset: 0; z-index: 800;
-      background: rgba(10,10,15,.75); backdrop-filter: blur(12px);
-      display: none; align-items: center; justify-content: center;
-    }
-    .bt-wizard-modal {
-      background: linear-gradient(145deg, #12121a, #1a1a28);
-      border: 1px solid rgba(255,255,255,.1);
-      border-radius: 20px;
-      padding: 40px 36px;
-      width: min(440px, 92vw);
-      box-shadow: 0 24px 64px rgba(0,0,0,.6);
-      position: relative;
-      text-align: center;
-      color: #fff;
-    }
-    #btn-close-bt-wizard {
-      position: absolute; top: 14px; right: 14px;
-      background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.12);
-      color: rgba(255,255,255,.6); border-radius: 8px; width: 32px; height: 32px;
-      cursor: pointer; font-size: 14px;
-    }
-
-    /* Phase: Pairing */
-    #btwiz-pairing h2 { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
-    #btwiz-pairing p { font-size: 13px; color: rgba(255,255,255,.5); margin-bottom: 30px; }
-    .bt-spinner-wrap { position: relative; width: 100px; height: 100px; margin: 0 auto 24px; }
-    .bt-ring {
-      position: absolute; inset: 0; border-radius: 50%;
-      border: 2px solid transparent;
-      border-top-color: var(--accent);
-      animation: spin 1.2s linear infinite;
-    }
-    .bt-ring-2 {
-      inset: 8px; animation-duration: 1.8s; animation-direction: reverse;
-      border-top-color: rgba(217,119,87,.4);
-    }
-    .bt-icon-center {
-      position: absolute; inset: 0; display: flex; align-items: center; justify-content: center;
-      font-size: 32px;
-    }
-    @keyframes spin { to { transform: rotate(360deg); } }
-    #btwiz-status-text {
-      font-size: 16px; font-weight: 600; color: rgba(255,255,255,.9); margin-bottom: 8px;
-    }
-    .btwiz-steps {
-      display: flex; flex-direction: column; gap: 6px; text-align: left; margin-top: 20px;
-    }
-    .btwiz-step { font-size: 12px; color: rgba(255,255,255,.35); padding: 4px 0; }
-
-    /* Phase: Connected / Signal */
-    #btwiz-connected h2 { font-size: 22px; font-weight: 800; margin-bottom: 6px; }
-    #btwiz-connected .btwiz-sub { font-size: 13px; color: rgba(255,255,255,.5); margin-bottom: 24px; }
-
-    /* CSS 3D Head */
-    .head-3d-scene {
-      width: 120px; height: 140px; margin: 0 auto 20px;
-      perspective: 600px;
-    }
-    .head-3d-body {
-      width: 100%; height: 100%;
-      animation: headFloat 4s ease-in-out infinite, headNod 5s ease-in-out infinite;
-      transform-style: preserve-3d;
-      position: relative;
-    }
-    @keyframes headFloat {
-      0%, 100% { transform: translateY(0px); }
-      50%       { transform: translateY(-6px); }
-    }
-    @keyframes headNod {
-      0%, 100% { transform: rotateY(0deg) rotateX(0deg); }
-      25%       { transform: rotateY(10deg) rotateX(3deg); }
-      75%       { transform: rotateY(-10deg) rotateX(-3deg); }
-    }
-    #btwiz-head-glow {
-      width: 90px; height: 110px;
-      background: linear-gradient(160deg, #2a2a3e 0%, #1a1a28 100%);
-      border-radius: 45% 45% 48% 48% / 40% 40% 60% 60%;
-      margin: 0 auto;
-      border: 2px solid rgba(255,255,255,.15);
-      position: relative; overflow: hidden;
-      box-shadow: 0 0 20px rgba(100,100,200,.2);
-      transition: border-color .5s, box-shadow .5s;
-    }
-    #btwiz-head-glow.signal-active {
-      border-color: var(--niruddha);
-      box-shadow: 0 0 30px rgba(86,166,122,.4);
-    }
-    .head-headset {
-      position: absolute; top: -6px; left: 50%; transform: translateX(-50%);
-      width: 100px; height: 18px;
-      border: 2px solid rgba(255,255,255,.2);
-      border-radius: 50px; border-bottom: none;
-    }
-    .head-electrode { position: absolute; width: 6px; height: 6px; border-radius: 50%; background: rgba(255,255,255,.3); top: -3px; }
-    .head-electrode.e-left  { left: 4px; }
-    .head-electrode.e-right { right: 4px; }
-    .head-electrode.e-mid   { left: 50%; transform: translateX(-50%); }
-    .head-face { position: absolute; bottom: 24px; left: 50%; transform: translateX(-50%); width: 50px; }
-    .head-eye { display: inline-block; width: 8px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.25); margin: 0 5px; }
-    .head-nose { width: 0; height: 0; border-left: 3px solid transparent; border-right: 3px solid transparent; border-top: 6px solid rgba(255,255,255,.15); margin: 4px auto; }
-    .head-mouth { width: 16px; height: 3px; border-radius: 2px; background: rgba(255,255,255,.2); margin: 4px auto 0; }
-
-    /* Signal waveform animation */
-    .signal-wave-wrap { height: 40px; margin: 0 auto 16px; position: relative; overflow: hidden; }
-    .signal-wave-svg { width: 100%; height: 40px; }
-    .signal-wave-line {
-      stroke: var(--accent); stroke-width: 2; fill: none;
-      animation: waveScroll 1.5s linear infinite;
-    }
-    @keyframes waveScroll {
-      from { stroke-dashoffset: 0; }
-      to   { stroke-dashoffset: -60; }
-    }
-
-    #btwiz-signal-label { font-size: 14px; font-weight: 600; margin-bottom: 10px; }
-    .btwiz-quality-wrap { margin-bottom: 16px; }
-    #btwiz-signal-quality {
-      display: inline-block; padding: 4px 14px; border-radius: 999px;
-      font-size: 13px; font-weight: 700; border: 1px solid rgba(255,255,255,.2);
-      background: rgba(255,255,255,.08);
-    }
-    .quality-poor      { background: rgba(199,92,92,.2)  !important; border-color: var(--kshipta)  !important; color: var(--kshipta); }
-    .quality-fair      { background: rgba(217,160,74,.2) !important; border-color: var(--vikshipta) !important; color: var(--vikshipta); }
-    .quality-good      { background: rgba(86,166,122,.2) !important; border-color: var(--niruddha)  !important; color: var(--niruddha); }
-    .quality-excellent { background: rgba(74,143,217,.2) !important; border-color: var(--ekagra)    !important; color: var(--ekagra); }
-    .btwiz-quality { display: inline-block; padding: 4px 14px; border-radius: 999px; font-size: 13px; font-weight: 700; border: 1px solid rgba(255,255,255,.2); }
-
-    /* Phase: Countdown */
-    #btwiz-countdown { padding: 20px 0; }
-    #btwiz-countdown h2 { font-size: 16px; font-weight: 600; color: rgba(255,255,255,.6); margin-bottom: 20px; }
-    .countdown-ring {
-      position: relative; width: 130px; height: 130px; margin: 0 auto 20px;
-    }
-    .countdown-svg { position: absolute; inset: 0; transform: rotate(-90deg); }
-    .countdown-circle-bg { fill: none; stroke: rgba(255,255,255,.08); stroke-width: 4; }
-    .countdown-circle { fill: none; stroke: var(--accent); stroke-width: 4; stroke-linecap: round;
-      stroke-dasharray: 345; stroke-dashoffset: 0;
-      animation: countdownShrink 1s ease-out forwards;
-    }
-    @keyframes countdownShrink {
-      from { stroke-dashoffset: 345; }
-      to   { stroke-dashoffset: 0; }
-    }
-    #btwiz-countdown-num {
-      position: absolute; inset: 0;
-      display: flex; align-items: center; justify-content: center;
-      font-size: 52px; font-weight: 900; color: #fff;
-    }
-    .countdown-animate {
-      animation: countdownPop .35s cubic-bezier(.34,1.56,.64,1) forwards;
-    }
-    @keyframes countdownPop {
-      from { transform: scale(.4); opacity: 0; }
-      to   { transform: scale(1); opacity: 1; }
-    }
-
-    /* Misc */
-    .text-muted { color: var(--text-muted); }
-    .error { color: var(--kshipta); }
+/* ── Replay Player ───────────────────────────────────────────────────── */
+.replay-player{display:flex;flex-direction:column;gap:10px;width:100%}
+.replay-controls{display:flex;gap:8px;align-items:center}
+.replay-btn{min-width:40px}
+.replay-track{display:flex;align-items:center}
+.replay-slider{flex:1;cursor:pointer;accent-color:var(--accent)}
+.replay-meta{display:flex;gap:16px;font-size:12px;color:var(--text-muted);align-items:center}
+.replay-time{margin-left:auto}
+.replay-state-display{display:grid;grid-template-columns:1fr 1fr;gap:8px 24px;background:var(--bg);border:1px solid var(--border);border-radius:8px;padding:14px 16px}
+.replay-state-row{display:flex;flex-direction:column;gap:2px}
+.replay-state-key{font-size:10px;color:var(--text-muted);text-transform:uppercase;letter-spacing:.05em}
+.replay-state-val{font-size:14px;font-weight:600;color:var(--text)}
+.replay-no-data{font-size:13px;color:var(--text-muted);text-align:center;padding:16px 0;font-style:italic}
   </style>
 </head>
 <body>
 
-<!-- ── LOGIN SCREEN ─────────────────────────────────────────────────────────── -->
-<div id="login-screen">
+<!-- ═══════════════════════════════════════════════════════
+     LOGIN SCREEN
+════════════════════════════════════════════════════════ -->
+<div id="login-screen" class="login-screen">
   <div class="login-card">
-    <h1>EEG Dev Testing</h1>
-    <p class="login-sub">from brainwaves to bliss</p>
-    <h2 style="font-size:16px;margin-bottom:18px;">Sign In</h2>
-    <div class="form-field">
-      <label for="input-username">Username</label>
-      <input id="input-username" type="text" placeholder="Username" autocomplete="username" />
+    <div class="login-brand">
+      <div class="login-brand-icon">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="2.5"/>
+          <path d="M10 32 Q16 20 22 32 Q28 44 34 32 Q40 20 46 32 Q52 44 54 32" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="login-brand-text">
+        <span class="login-brand-name">EEG Dev Testing</span>
+        <span class="login-brand-sub">from brainwaves to bliss</span>
+      </div>
     </div>
-    <div class="form-field">
-      <label for="input-password">Password</label>
-      <input id="input-password" type="password" placeholder="Password" autocomplete="current-password" />
+    <div class="login-form-section">
+      <div class="login-title">Sign In</div>
+      <div id="login-error" class="login-error" style="display:none"></div>
+      <div class="login-field">
+        <label class="field-label" for="input-username">Username</label>
+        <input class="field-input" id="input-username" type="text" autocomplete="username" placeholder="Username" />
+      </div>
+      <div class="login-field">
+        <label class="field-label" for="input-password">Password</label>
+        <input class="field-input" id="input-password" type="password" autocomplete="current-password" placeholder="Password" />
+      </div>
+      <button class="btn btn-primary login-btn" id="btn-login">Sign In</button>
     </div>
-    <div id="login-error"></div>
-    <button class="btn-primary" id="btn-login">Sign In</button>
   </div>
 </div>
 
-<!-- ── SETTINGS OVERLAY ──────────────────────────────────────────────────────── -->
-<div id="settings-overlay">
+<!-- ═══════════════════════════════════════════════════════
+     MAIN HEADER
+════════════════════════════════════════════════════════ -->
+<header id="main-header" class="header" style="display:none">
+  <div class="header-inner">
+    <div class="brand">
+      <div class="brand-icon">
+        <svg viewBox="0 0 64 64" fill="none" xmlns="http://www.w3.org/2000/svg">
+          <circle cx="32" cy="32" r="30" stroke="currentColor" stroke-width="2.5"/>
+          <path d="M10 32 Q16 20 22 32 Q28 44 34 32 Q40 20 46 32 Q52 44 54 32" stroke="currentColor" stroke-width="2.5" fill="none" stroke-linecap="round" stroke-linejoin="round"/>
+        </svg>
+      </div>
+      <div class="brand-text">
+        <span class="brand-name">EEG Dev Testing</span>
+        <span class="brand-sub">from brainwaves to bliss</span>
+      </div>
+    </div>
+    <div class="header-right">
+      <!-- Admin Dashboard Button -->
+      <button class="btn btn-ghost" id="btn-open-admin" style="display:none">
+        Admin Dashboard
+      </button>
+
+      <!-- Settings -->
+      <button class="btn btn-ghost" id="btn-settings">⚙</button>
+
+      <!-- User menu -->
+      <div class="user-menu" id="user-menu-wrapper">
+        <button class="user-avatar" id="btn-user-menu">
+          <span id="user-avatar-initial">?</span>
+        </button>
+        <div class="user-dropdown" id="user-dropdown" style="display:none">
+          <div class="user-dropdown-info">
+            <span id="user-display-name" class="user-dropdown-name">—</span>
+            <span id="user-menu-role" class="user-dropdown-role">—</span>
+          </div>
+          <hr class="dropdown-divider" />
+          <button class="dropdown-item" id="btn-logout">Sign out</button>
+        </div>
+      </div>
+    </div>
+  </div>
+</header>
+
+<!-- ═══════════════════════════════════════════════════════
+     SETTINGS OVERLAY
+════════════════════════════════════════════════════════ -->
+<div id="settings-overlay" class="settings-overlay">
   <div class="settings-panel">
     <div class="settings-header">
-      <h2>configuration</h2>
-      <button class="settings-close" id="btn-close-settings">✕</button>
+      <span class="settings-title">configuration</span>
+      <button class="btn btn-ghost" id="btn-close-settings">✕</button>
     </div>
 
+    <!-- Bluetooth -->
     <div class="settings-section">
-      <h3>Bluetooth Headband</h3>
-      <div class="bt-device-row" id="bt-device-row" style="display:none">
-        <span id="bt-device-name">—</span>
-        <button class="btn-sm btn-danger" id="btn-bt-disconnect">Disconnect</button>
+      <div class="settings-section-title">Bluetooth Headband</div>
+      <div id="bt-device-row" class="bt-device-row" style="display:none">
+        <span id="bt-device-name" class="bt-device-name">—</span>
+        <button class="btn btn-ghost btn-sm" id="btn-bt-disconnect">Disconnect</button>
       </div>
-      <button class="btn-sm" id="btn-bluetooth">Scan &amp; Connect Headband</button>
-      <p class="text-muted" style="font-size:12px;margin-top:8px;">
-        Works with Muse, BrainBit, and any BLE EEG headband. Raw EEG is collected for 2&nbsp;s then sent to your Render backend for full Random-Forest classification — or processed locally if no backend is configured. Requires <code>Chrome</code> or <code>Edge</code>.
+      <button class="btn btn-secondary" id="btn-bt-scan">Scan &amp; Connect Headband</button>
+      <p class="settings-note">
+        Works with Muse, BrainBit, and any BLE EEG headband. Raw EEG is
+        collected for 2&thinsp;s then sent to your Render backend for full
+        Random-Forest classification — or processed locally if no backend
+        is configured. Requires <code>Chrome</code> or <code>Edge</code>.
       </p>
     </div>
 
+    <!-- Backend URL -->
     <div class="settings-section">
-      <h3>Render Backend URL</h3>
-      <div class="url-row">
-        <input id="input-backend-url" type="url" placeholder="Backend URL" />
-        <button class="btn-sm" id="btn-test">Test connection</button>
-        <button class="btn-sm" id="btn-save">Save &amp; connect</button>
+      <div class="settings-section-title">Render Backend URL</div>
+      <div class="settings-field">
+        <label class="field-label" for="input-backend-url">Backend URL</label>
+        <input class="field-input" id="input-backend-url" type="url"
+               placeholder="https://your-app.onrender.com" />
       </div>
-      <div id="test-msg"></div>
-      <p class="text-muted" style="font-size:12px;margin-top:6px;">The backend must expose <code>POST /analyze</code> (raw EEG) and optionally <code>POST /analyze/bands</code> (pre-computed powers).</p>
+      <p class="settings-note">
+        The backend must expose <code>POST /analyze</code> (raw EEG) and
+        optionally <code>POST /analyze/bands</code> (pre-computed powers).
+      </p>
+      <div style="display:flex;gap:8px;margin-top:8px">
+        <button class="btn btn-ghost btn-sm" id="btn-test">Test connection</button>
+        <button class="btn btn-primary btn-sm" id="btn-save">Save &amp; connect</button>
+      </div>
+      <div id="test-msg" style="display:none;font-size:12px;margin-top:6px"></div>
     </div>
 
-    <div class="settings-docs" style="display:none">
-      <strong>Raw EEG endpoint</strong>
-      <pre>POST /analyze
+    <!-- API reference -->
+    <div class="settings-section">
+      <div class="settings-section-title">Raw EEG endpoint</div>
+      <pre class="settings-code">POST /analyze
 {
   "eeg_data": [[ch0_s0, ch0_s1, ...], [ch1_s0, ...]],
   "sample_rate": 256
 }</pre>
-      <strong>Pre-computed bands endpoint</strong>
-      <pre>POST /analyze/bands
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Pre-computed bands endpoint</div>
+      <pre class="settings-code">POST /analyze/bands
 { "delta": 0.12, "theta": 0.22, "alpha": 0.41,
   "beta": 0.18, "gamma": 0.07 }</pre>
-      <strong>Response (both endpoints)</strong>
-      <pre>{
+    </div>
+    <div class="settings-section">
+      <div class="settings-section-title">Response (both endpoints)</div>
+      <pre class="settings-code">{
   "chitta_bhumi": { "state": "Ekagra", "confidence": "82.4%" },
   "swara":        { "state": "Ida (Parasympathetic)" },
   "tattva":       ["Pratyahara Window detected"],
@@ -733,433 +203,590 @@
   </div>
 </div>
 
-<!-- ── BLUETOOTH WIZARD MODAL ────────────────────────────────────────────────── -->
-<div id="bt-wizard-overlay">
-  <div class="bt-wizard-modal">
-    <button id="btn-close-bt-wizard">✕</button>
+<!-- ═══════════════════════════════════════════════════════
+     MAIN CONTENT — EEG Dashboard
+════════════════════════════════════════════════════════ -->
+<main id="main-content" class="main-content" style="display:none">
+  <div class="dashboard-grid">
 
-    <!-- Phase: Pairing -->
-    <div id="btwiz-pairing">
-      <h2>Connecting to EEG Device…</h2>
-      <p>Please keep your headband nearby</p>
-
-      <div class="bt-spinner-wrap">
-        <div class="bt-ring"></div>
-        <div class="bt-ring bt-ring-2"></div>
-        <div class="bt-icon-center">📡</div>
+    <!-- ─ Live Metric Bar ─ -->
+    <div class="metric-bar card">
+      <div class="metric-item">
+        <span class="metric-label">EPOCH</span>
+        <span class="metric-value" id="val-epoch">—</span>
       </div>
-
-      <div id="btwiz-status-text">Searching…</div>
-
-      <div class="btwiz-steps">
-        <div class="btwiz-step">① Scanning for BLE EEG devices…</div>
-        <div class="btwiz-step">② Authenticating with headband…</div>
-        <div class="btwiz-step">③ Starting EEG data stream…</div>
+      <div class="metric-item">
+        <span class="metric-label">QUALITY</span>
+        <span class="metric-value" id="val-quality">awaiting signal</span>
       </div>
-    </div>
-
-    <!-- Phase: Connected / Waiting for signal -->
-    <div id="btwiz-connected" style="display:none">
-      <h2>Headband Connected</h2>
-      <p class="btwiz-sub">Please put on your EEG headset.</p>
-
-      <div class="head-3d-scene">
-        <div class="head-3d-body">
-          <div id="btwiz-head-glow">
-            <div class="head-headset">
-              <div class="head-electrode e-left"></div>
-              <div class="head-electrode e-mid"></div>
-              <div class="head-electrode e-right"></div>
-            </div>
-            <div class="head-face">
-              <div><span class="head-eye"></span><span class="head-eye"></span></div>
-              <div class="head-nose"></div>
-              <div class="head-mouth"></div>
-            </div>
-          </div>
-        </div>
+      <div class="metric-item">
+        <span class="metric-label">LATENCY</span>
+        <span class="metric-value"><span id="val-latency">—</span> <span class="metric-unit">ms</span></span>
       </div>
-
-      <div id="btwiz-signal-label">Waiting for Brain Signals…</div>
-
-      <!-- Animated waveform -->
-      <div class="signal-wave-wrap">
-        <svg class="signal-wave-svg" viewBox="0 0 300 40" preserveAspectRatio="none">
-          <path class="signal-wave-line"
-            stroke-dasharray="6 3"
-            d="M0,20 C15,5 25,35 40,20 C55,5 65,35 80,20 C95,5 105,35 120,20 C135,5 145,35 160,20 C175,5 185,35 200,20 C215,5 225,35 240,20 C255,5 265,35 280,20 C295,5 305,35 320,20" />
-        </svg>
+      <div class="metric-item">
+        <span class="metric-label">BUFFER</span>
+        <span class="metric-value" id="val-buffer">0 / 512</span>
       </div>
-
-      <div class="btwiz-quality-wrap">
-        <span id="btwiz-signal-quality" class="btwiz-quality">—</span>
+      <div class="metric-item">
+        <span class="metric-label">MODE</span>
+        <span class="metric-value" id="val-mode">—</span>
       </div>
-    </div>
-
-    <!-- Phase: Countdown -->
-    <div id="btwiz-countdown" style="display:none">
-      <h2>Analysis Begins In</h2>
-      <div class="countdown-ring">
-        <svg class="countdown-svg" viewBox="0 0 120 120">
-          <circle class="countdown-circle-bg" cx="60" cy="60" r="55" />
-          <circle class="countdown-circle" cx="60" cy="60" r="55" />
-        </svg>
-        <div id="btwiz-countdown-num">3</div>
+      <div class="metric-item">
+        <span class="metric-label">BOARD</span>
+        <span class="metric-value" id="val-board">—</span>
       </div>
-    </div>
-
-  </div>
-</div>
-
-<!-- ── MAIN HEADER ───────────────────────────────────────────────────────────── -->
-<header id="main-header" style="display:none">
-  <span class="header-brand">EEG Dev Testing</span>
-
-  <button class="btn-icon" id="btn-settings">configuration</button>
-
-  <div class="user-menu-wrap">
-    <button id="btn-user-menu">
-      <div class="user-avatar"><span id="user-avatar-initial">?</span></div>
-      <span id="user-display-name">—</span>
-    </button>
-    <div id="user-dropdown">
-      <div id="user-menu-role" style="font-size:11px;color:var(--text-muted);padding:8px 14px 2px;">user</div>
-      <div class="dropdown-item" id="btn-open-admin" style="display:none">Admin Dashboard</div>
-      <div class="dropdown-item" id="btn-logout">Sign out</div>
-    </div>
-  </div>
-</header>
-
-<!-- ── MAIN CONTENT ──────────────────────────────────────────────────────────── -->
-<div id="main-content" style="display:none; flex-direction:column; gap:12px; padding:16px;">
-
-  <!-- Stats bar -->
-  <div class="stats-bar">
-    <div class="stat"><span class="stat-label">EPOCH</span><span class="stat-value" id="val-epoch">—</span></div>
-    <div class="stat"><span class="stat-label">QUALITY</span><span class="stat-value" id="val-quality">awaiting signal</span></div>
-    <div class="stat"><span class="stat-label">LATENCY</span><span class="stat-value" id="val-latency">—</span><span style="font-size:10px;color:var(--text-muted)">ms</span></div>
-    <div class="stat"><span class="stat-label">BUFFER</span><span class="stat-value" id="val-buffer">0 / 512</span></div>
-    <div class="stat"><span class="stat-label">MODE</span><span class="stat-value" id="val-mode">—</span></div>
-    <div class="stat"><span class="stat-label">BOARD</span><span class="stat-value" id="val-board">—</span></div>
-    <div class="stat status-row">
-      <span class="stat-label">STATUS</span>
-      <div class="status-row" style="margin-top:4px">
-        <div class="status-dot" id="status-dot"></div>
-        <span id="status-text">disconnected</span>
-      </div>
-    </div>
-  </div>
-
-  <!-- Main 3-col grid -->
-  <div style="display:flex; gap:14px; flex-wrap:wrap;">
-
-    <!-- Left column -->
-    <div class="col-left" style="min-width:180px;">
-
-      <!-- Chitta Bhumi -->
-      <div class="card">
-        <div class="card-title">CHITTA BHUMI</div>
-        <div class="chitta-state-large" id="chitta-state">—</div>
-        <div class="chitta-sub" id="chitta-sub">awaiting signal</div>
-        <div class="depth-scale"><div id="depth-fill" style="width:12%"></div></div>
-        <div class="depth-labels"><span>Kshipta</span><span>Vikshipta</span><span>Ekagra</span><span>Niruddha</span></div>
-        <div style="margin-top:10px">
-          <div class="card-title" style="margin-bottom:6px">CONFIDENCE</div>
-          <div id="val-confidence" style="font-size:20px;font-weight:800;">—</div>
-        </div>
-      </div>
-
-      <!-- State Probabilities -->
-      <div class="card">
-        <div class="card-title">STATE PROBABILITIES</div>
-        <div class="prob-row"><span class="prob-name">Kshipta</span><div class="prob-bar-wrap"><div class="prob-bar" id="bar-kshipta" style="width:0%"></div></div><span class="prob-pct" id="prob-kshipta">—</span></div>
-        <div class="prob-row"><span class="prob-name">Vikshipta</span><div class="prob-bar-wrap"><div class="prob-bar" id="bar-vikshipta" style="width:0%"></div></div><span class="prob-pct" id="prob-vikshipta">—</span></div>
-        <div class="prob-row"><span class="prob-name">Ekagra</span><div class="prob-bar-wrap"><div class="prob-bar" id="bar-ekagra" style="width:0%"></div></div><span class="prob-pct" id="prob-ekagra">—</span></div>
-        <div class="prob-row"><span class="prob-name">Niruddha</span><div class="prob-bar-wrap"><div class="prob-bar" id="bar-niruddha" style="width:0%"></div></div><span class="prob-pct" id="prob-niruddha">—</span></div>
-        <div style="margin-top:10px">
-          <div class="card-title" style="margin-bottom:4px">CONTEMPLATIVE DEPTH</div>
-          <div id="val-depth" style="font-size:16px;font-weight:700;">—</div>
+      <div class="metric-item">
+        <span class="metric-label">STATUS</span>
+        <div class="status-indicator" id="status-indicator">
+          <span class="status-dot" id="status-dot"></span>
+          <span class="status-text" id="status-text">disconnected</span>
         </div>
       </div>
     </div>
 
-    <!-- Centre column -->
-    <div class="col-main" style="flex:1; min-width:280px;">
+    <!-- ─ EEG Waveform Canvas ─ -->
+    <div class="card canvas-card">
+      <canvas id="eeg-canvas"></canvas>
+    </div>
 
-      <!-- EEG Canvas -->
-      <div class="card" style="padding:12px;">
-        <div class="canvas-wrap"><canvas id="eeg-canvas"></canvas></div>
-      </div>
-
-      <!-- Swara Nadi -->
-      <div class="card">
-        <div class="card-title">SWARA NADI</div>
-        <div class="swara-glyphs">
-          <div class="swara-glyph" id="glyph-ida">
-            <span class="glyph-icon">🌙</span>
-            <span class="glyph-name">Ida</span>
-            <span class="glyph-sub">lunar · left</span>
-          </div>
-          <div class="swara-glyph" id="glyph-sushumna">
-            <span class="glyph-icon">⚖️</span>
-            <span class="glyph-name">Sushumna</span>
-            <span class="glyph-sub">balanced</span>
-          </div>
-          <div class="swara-glyph" id="glyph-pingala">
-            <span class="glyph-icon">☀️</span>
-            <span class="glyph-name">Pingala</span>
-            <span class="glyph-sub">solar · right</span>
-          </div>
+    <!-- ─ Chitta Bhumi ─ -->
+    <div class="card chitta-card">
+      <div class="card-label">CHITTA BHUMI</div>
+      <div class="chitta-state" id="chitta-state">—</div>
+      <div class="chitta-sub" id="chitta-sub">awaiting signal</div>
+      <div class="depth-track">
+        <div class="depth-stops">
+          <span class="depth-stop" data-stop="Kshipta">Kshipta</span>
+          <span class="depth-stop" data-stop="Vikshipta">Vikshipta</span>
+          <span class="depth-stop" data-stop="Ekagra">Ekagra</span>
+          <span class="depth-stop" data-stop="Niruddha">Niruddha</span>
         </div>
-        <div class="asym-labels"><span>L</span><span>R</span></div>
+        <div class="depth-bar">
+          <div class="depth-fill" id="depth-fill"></div>
+        </div>
+      </div>
+      <div class="chitta-meta">
+        <span class="meta-label">CONFIDENCE</span>
+        <span class="meta-value" id="val-confidence">—</span>
+      </div>
+    </div>
+
+    <!-- ─ State Probabilities ─ -->
+    <div class="card probs-card">
+      <div class="card-label">STATE PROBABILITIES</div>
+      <div class="prob-list">
+        <div class="prob-item">
+          <div class="prob-header"><span class="prob-name kshipta-label">Kshipta</span><span class="prob-val" id="prob-kshipta">—</span></div>
+          <div class="prob-bar-bg"><div class="prob-bar kshipta-bar" id="bar-kshipta"></div></div>
+        </div>
+        <div class="prob-item">
+          <div class="prob-header"><span class="prob-name vikshipta-label">Vikshipta</span><span class="prob-val" id="prob-vikshipta">—</span></div>
+          <div class="prob-bar-bg"><div class="prob-bar vikshipta-bar" id="bar-vikshipta"></div></div>
+        </div>
+        <div class="prob-item">
+          <div class="prob-header"><span class="prob-name ekagra-label">Ekagra</span><span class="prob-val" id="prob-ekagra">—</span></div>
+          <div class="prob-bar-bg"><div class="prob-bar ekagra-bar" id="bar-ekagra"></div></div>
+        </div>
+        <div class="prob-item">
+          <div class="prob-header"><span class="prob-name niruddha-label">Niruddha</span><span class="prob-val" id="prob-niruddha">—</span></div>
+          <div class="prob-bar-bg"><div class="prob-bar niruddha-bar" id="bar-niruddha"></div></div>
+        </div>
+      </div>
+      <div class="chitta-meta">
+        <span class="meta-label">CONTEMPLATIVE DEPTH</span>
+        <span class="meta-value" id="val-depth">—</span>
+      </div>
+    </div>
+
+    <!-- ─ Swara Nadi ─ -->
+    <div class="card swara-card">
+      <div class="card-label">SWARA NADI</div>
+      <div class="swara-glyphs">
+        <div class="swara-glyph" id="glyph-ida">
+          <div class="swara-symbol">🌙</div>
+          <div class="swara-name">Ida</div>
+          <div class="swara-sub">lunar · left</div>
+        </div>
+        <div class="swara-glyph active-sushumna" id="glyph-sushumna">
+          <div class="swara-symbol">⚖️</div>
+          <div class="swara-name">Sushumna</div>
+          <div class="swara-sub">balanced</div>
+        </div>
+        <div class="swara-glyph" id="glyph-pingala">
+          <div class="swara-symbol">☀️</div>
+          <div class="swara-name">Pingala</div>
+          <div class="swara-sub">solar · right</div>
+        </div>
+      </div>
+      <div class="asym-track">
+        <span class="asym-label">L</span>
         <div class="asym-bar">
-          <div id="asym-fill"></div>
-          <div id="asym-thumb"></div>
+          <div class="asym-fill" id="asym-fill"></div>
+          <div class="asym-thumb" id="asym-thumb"></div>
         </div>
-        <div style="margin-top:8px;font-size:12px;color:var(--text-muted)" id="swara-note">—</div>
-        <div style="margin-top:4px;font-size:11px;color:var(--text-muted)">CONFIDENCE: <span id="swara-confidence">—</span></div>
+        <span class="asym-label">R</span>
       </div>
-
-      <!-- Spectral Bands -->
-      <div class="card">
-        <div class="card-title">SPECTRAL BAND POWERS</div>
-        <div class="band-row"><span class="band-sym" style="color:var(--delta)">δ</span><div class="band-info"><span class="band-name">Delta</span><span class="band-hz">1–4 Hz</span></div><div class="band-bar-wrap"><div class="band-bar" id="bar-delta" style="width:0%"></div></div><span class="band-val" id="val-delta">—</span></div>
-        <div class="band-row"><span class="band-sym" style="color:var(--theta)">θ</span><div class="band-info"><span class="band-name">Theta</span><span class="band-hz">4–8 Hz</span></div><div class="band-bar-wrap"><div class="band-bar" id="bar-theta" style="width:0%"></div></div><span class="band-val" id="val-theta">—</span></div>
-        <div class="band-row"><span class="band-sym" style="color:var(--alpha)">α</span><div class="band-info"><span class="band-name">Alpha</span><span class="band-hz">8–13 Hz</span></div><div class="band-bar-wrap"><div class="band-bar" id="bar-alpha" style="width:0%"></div></div><span class="band-val" id="val-alpha">—</span></div>
-        <div class="band-row"><span class="band-sym" style="color:var(--beta)">β</span><div class="band-info"><span class="band-name">Beta</span><span class="band-hz">13–30 Hz</span></div><div class="band-bar-wrap"><div class="band-bar" id="bar-beta" style="width:0%"></div></div><span class="band-val" id="val-beta">—</span></div>
-        <div class="band-row"><span class="band-sym" style="color:var(--gamma)">γ</span><div class="band-info"><span class="band-name">Gamma</span><span class="band-hz">30–50 Hz</span></div><div class="band-bar-wrap"><div class="band-bar" id="bar-gamma" style="width:0%"></div></div><span class="band-val" id="val-gamma">—</span></div>
-      </div>
-
-      <!-- Trigunas -->
-      <div class="card">
-        <div class="card-title">TRIGUNAS</div>
-        <div class="gunas-dominant-row">
-          <span class="gunas-dom-label" id="gunas-dominant">—</span>
-        </div>
-        <p class="gunas-note" id="gunas-note"></p>
-        <div class="guna-row"><span class="guna-sym">☀</span><span class="guna-name">Sattva</span><span class="guna-sub">clarity</span><div class="guna-bar-wrap"><div class="guna-bar" id="bar-sattva" style="width:0%"></div></div><span class="guna-val" id="val-sattva">—</span></div>
-        <div class="guna-row"><span class="guna-sym">🔥</span><span class="guna-name">Rajas</span><span class="guna-sub">activity</span><div class="guna-bar-wrap"><div class="guna-bar" id="bar-rajas" style="width:0%"></div></div><span class="guna-val" id="val-rajas">—</span></div>
-        <div class="guna-row"><span class="guna-sym">🌑</span><span class="guna-name">Tamas</span><span class="guna-sub">inertia</span><div class="guna-bar-wrap"><div class="guna-bar" id="bar-tamas" style="width:0%"></div></div><span class="guna-val" id="val-tamas">—</span></div>
-      </div>
-
-      <!-- Tattva -->
-      <div class="card">
-        <div class="card-title">TATTVA / CHAKRA CORRELATES</div>
-        <div id="tattva-flags">no flags active</div>
+      <div class="swara-note" id="swara-note">—</div>
+      <div class="chitta-meta">
+        <span class="meta-label">CONFIDENCE</span>
+        <span class="meta-value" id="swara-confidence">—</span>
       </div>
     </div>
 
-    <!-- Right column -->
-    <div class="col-right" style="min-width:200px;">
+    <!-- ─ Spectral Band Powers ─ -->
+    <div class="card bands-card">
+      <div class="card-label">SPECTRAL BAND POWERS</div>
+      <div class="band-list">
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym delta-sym">δ</span>
+            <span class="band-name">Delta</span>
+            <span class="band-hz">1–4 Hz</span>
+            <span class="band-val" id="val-delta">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar delta-bar" id="bar-delta"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym theta-sym">θ</span>
+            <span class="band-name">Theta</span>
+            <span class="band-hz">4–8 Hz</span>
+            <span class="band-val" id="val-theta">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar theta-bar" id="bar-theta"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym alpha-sym">α</span>
+            <span class="band-name">Alpha</span>
+            <span class="band-hz">8–13 Hz</span>
+            <span class="band-val" id="val-alpha">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar alpha-bar" id="bar-alpha"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym beta-sym">β</span>
+            <span class="band-name">Beta</span>
+            <span class="band-hz">13–30 Hz</span>
+            <span class="band-val" id="val-beta">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar beta-bar" id="bar-beta"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym gamma-sym">γ</span>
+            <span class="band-name">Gamma</span>
+            <span class="band-hz">30–50 Hz</span>
+            <span class="band-val" id="val-gamma">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar gamma-bar" id="bar-gamma"></div></div>
+        </div>
+      </div>
+    </div>
 
-      <!-- Session Management -->
-      <div class="card">
-        <div class="card-title">SESSION MANAGEMENT</div>
-        <button class="btn-sm" id="btn-start-session">Start Session</button>
-        <button class="btn-sm" id="btn-end-session" style="display:none">End Session</button>
-        <div class="session-name-row" style="margin-top:8px;">
-          <span id="session-name-display">—</span>
+    <!-- ─ Trigunas (NEW) ─ -->
+    <div class="card gunas-card">
+      <div class="card-label">TRIGUNAS</div>
+      <div class="gunas-label-row">
+        <span class="gunas-dominant" id="gunas-dominant">—</span>
+        <span class="gunas-note" id="gunas-note"></span>
+      </div>
+      <div class="band-list">
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym sattva-sym">☀</span>
+            <span class="band-name">Sattva</span>
+            <span class="band-hz">clarity</span>
+            <span class="band-val" id="val-sattva">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar sattva-bar" id="bar-sattva"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym rajas-sym">🔥</span>
+            <span class="band-name">Rajas</span>
+            <span class="band-hz">activity</span>
+            <span class="band-val" id="val-rajas">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar rajas-bar" id="bar-rajas"></div></div>
+        </div>
+        <div class="band-item">
+          <div class="band-header">
+            <span class="band-sym tamas-sym">🌑</span>
+            <span class="band-name">Tamas</span>
+            <span class="band-hz">inertia</span>
+            <span class="band-val" id="val-tamas">—</span>
+          </div>
+          <div class="band-bar-bg"><div class="band-bar tamas-bar" id="bar-tamas"></div></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- ─ Tattva / Chakra Correlates ─ -->
+    <div class="card tattva-card">
+      <div class="card-label">TATTVA / CHAKRA CORRELATES</div>
+      <div class="tattva-flags" id="tattva-flags">no flags active</div>
+    </div>
+
+    <!-- ─ Session Management ─ -->
+    <div class="card session-card">
+      <div class="card-label">SESSION MANAGEMENT</div>
+      <div class="session-controls">
+        <button class="btn btn-primary" id="btn-start-session">Start Session</button>
+        <div class="session-timer-row">
+          <span class="session-name-display" id="session-name-display">—</span>
           <span class="session-timer" id="session-timer">0:00</span>
         </div>
-        <div class="session-notes-wrap">
-          <label>SESSION NOTES</label>
-          <textarea id="session-notes" placeholder="Notes about this session…"></textarea>
+        <button class="btn btn-danger" id="btn-end-session" style="display:none">End Session</button>
+      </div>
+      <div class="session-notes-section">
+        <div class="session-notes-label">SESSION NOTES</div>
+        <textarea class="session-notes-input" id="session-notes" placeholder="Notes for this session…" rows="3"></textarea>
+      </div>
+    </div>
+
+    <!-- ─ Mode Buttons ─ -->
+    <div class="mode-buttons card">
+      <button class="btn btn-secondary" id="btn-bluetooth">
+        <span class="btn-icon">📡</span> Bluetooth
+      </button>
+      <button class="btn btn-secondary" id="btn-demo">
+        <span class="btn-icon">▶</span> Demo
+      </button>
+    </div>
+
+    <!-- ─ Session History ─ -->
+    <div class="card history-card">
+      <div class="history-header">
+        <span class="card-label">SESSION HISTORY</span>
+        <button class="btn btn-ghost btn-sm" id="btn-toggle-history">Show</button>
+      </div>
+      <div id="history-list" class="history-list" style="display:none">
+        <div id="history-empty" class="history-empty">No sessions yet</div>
+      </div>
+    </div>
+
+  </div><!-- /dashboard-grid -->
+</main>
+
+<!-- ═══════════════════════════════════════════════════════
+     BLUETOOTH WIZARD MODAL
+════════════════════════════════════════════════════════ -->
+<div id="bt-wizard-overlay" class="bt-wizard-overlay" style="display:none">
+  <div class="bt-wizard-panel">
+    <div class="bt-wizard-header">
+      <h2 class="bt-wizard-title">Connect Muse Headband</h2>
+      <button class="btn btn-ghost btn-sm" id="btn-close-bt-wizard">✕</button>
+    </div>
+    <div class="bt-wizard-body">
+
+      <!-- Phase: idle -->
+      <div id="btwiz-phase-idle" class="btwiz-phase">
+        <div class="btwiz-icon">🎧</div>
+        <h3 class="btwiz-heading">Ready to pair?</h3>
+        <p class="btwiz-desc">Put on your Muse headband and ensure Bluetooth is enabled. Press the button on the headband until the light flashes.</p>
+        <button class="btn btn-primary" id="btn-btwiz-start">Start Pairing</button>
+      </div>
+
+      <!-- Phase: pairing (browser picker open) -->
+      <div id="btwiz-phase-pairing" class="btwiz-phase" style="display:none">
+        <div class="btwiz-spinner"></div>
+        <h3 class="btwiz-heading">Searching for device…</h3>
+        <p class="btwiz-desc">Select your Muse headband from the browser's Bluetooth picker.</p>
+      </div>
+
+      <!-- Phase: waiting for signal -->
+      <div id="btwiz-phase-waiting" class="btwiz-phase" style="display:none">
+        <div class="btwiz-icon btwiz-icon-pulse">📡</div>
+        <h3 class="btwiz-heading">Waiting for EEG signal</h3>
+        <p class="btwiz-desc">Connected to <strong id="btwiz-device-name">—</strong>. Adjust the headband until signal quality improves.</p>
+        <div class="btwiz-quality-bar-bg">
+          <div class="btwiz-quality-bar" id="btwiz-quality-bar"></div>
         </div>
+        <p class="btwiz-quality-label" id="btwiz-quality-label">Checking signal…</p>
       </div>
 
-      <!-- Controls -->
-      <div class="card">
-        <div class="controls-row">
-          <button class="btn-icon" id="btn-bluetooth">📡 Bluetooth</button>
-          <button class="btn-icon" id="btn-demo">▶ Demo</button>
+      <!-- Phase: countdown -->
+      <div id="btwiz-phase-countdown" class="btwiz-phase" style="display:none">
+        <div class="btwiz-countdown-ring">
+          <span id="btwiz-countdown-number">3</span>
         </div>
+        <h3 class="btwiz-heading">Starting in…</h3>
+        <p class="btwiz-desc">Keep still. Analysis will begin automatically.</p>
       </div>
 
-      <!-- Session History -->
-      <div class="card">
-        <div class="history-header">
-          <h3>SESSION HISTORY</h3>
-          <button class="btn-sm" id="btn-toggle-history">Show</button>
-        </div>
-        <div id="history-list" style="display:none">
-          <p id="history-empty" class="text-muted" style="font-size:12px;">No sessions yet</p>
-        </div>
+      <!-- Phase: done -->
+      <div id="btwiz-phase-done" class="btwiz-phase" style="display:none">
+        <div class="btwiz-icon">✅</div>
+        <h3 class="btwiz-heading">Live feed active</h3>
+        <p class="btwiz-desc">EEG stream connected. The dashboard is updating in real time.</p>
+        <button class="btn btn-primary" id="btn-btwiz-done">Close Wizard</button>
       </div>
-    </div>
 
-  </div><!-- end 3-col -->
-</div><!-- end main-content -->
-
-<!-- ── ADMIN PAGE ────────────────────────────────────────────────────────────── -->
-<div id="admin-page" style="display:none">
-  <button class="btn-sm" id="btn-back-to-dashboard" style="margin-bottom:16px;">← Dashboard</button>
-  <h1>Admin Dashboard</h1>
-
-  <div class="admin-tabs">
-    <div class="admin-tab active" data-tab="users">Users</div>
-    <div class="admin-tab" data-tab="sessions">Sessions</div>
-  </div>
-
-  <!-- Users tab -->
-  <div id="admin-tab-users">
-    <div class="admin-section-header">
-      <h2>User Accounts</h2>
-      <button class="btn-sm" id="btn-add-user">+ Add User</button>
-    </div>
-
-    <div class="admin-form" id="create-user-form" style="display:none">
-      <div class="form-row">
-        <input id="new-username" placeholder="Username" />
-        <input id="new-password" type="password" placeholder="Password" />
-        <select id="new-role"><option value="user">User</option><option value="admin">Admin</option></select>
-        <button class="btn-sm" id="btn-create-user">Create</button>
-        <button class="btn-sm" id="btn-cancel-create-user">Cancel</button>
+      <!-- Phase: error -->
+      <div id="btwiz-phase-error" class="btwiz-phase" style="display:none">
+        <div class="btwiz-icon">⚠️</div>
+        <h3 class="btwiz-heading">Connection failed</h3>
+        <p class="btwiz-desc" id="btwiz-error-msg">Something went wrong. Please try again.</p>
+        <button class="btn btn-primary" id="btn-btwiz-retry">Try Again</button>
       </div>
-      <div class="admin-error" id="create-user-error"></div>
-    </div>
 
-    <div class="admin-form" id="reset-pw-form" style="display:none">
-      <div class="form-row">
-        <input id="reset-pw-input" type="password" placeholder="New password" />
-        <button class="btn-sm" id="btn-save-reset-pw">Save</button>
-        <button class="btn-sm" id="btn-cancel-reset-pw">Cancel</button>
-      </div>
     </div>
-
-    <table>
-      <thead><tr><th>Username</th><th>Role</th><th>Created</th><th>Actions</th></tr></thead>
-      <tbody id="admin-users-tbody"><tr><td colspan="4">Loading…</td></tr></tbody>
-    </table>
-  </div>
-
-  <!-- Sessions tab -->
-  <div id="admin-tab-sessions" style="display:none">
-    <div class="admin-section-header">
-      <h2>All Sessions</h2>
+    <!-- Step indicator -->
+    <div class="btwiz-steps">
+      <div class="btwiz-step" id="btwiz-step-1" data-active="true">1. Pair</div>
+      <div class="btwiz-step-line"></div>
+      <div class="btwiz-step" id="btwiz-step-2">2. Signal</div>
+      <div class="btwiz-step-line"></div>
+      <div class="btwiz-step" id="btwiz-step-3">3. Go</div>
     </div>
-    <div class="sessions-search">
-      <input id="admin-sessions-search" placeholder="Search by username…" />
-    </div>
-    <table>
-      <thead><tr><th>User</th><th>Session Name</th><th>Start</th><th>Duration</th><th>Epochs</th><th>Actions</th></tr></thead>
-      <tbody id="admin-sessions-tbody"><tr><td colspan="6">Loading…</td></tr></tbody>
-    </table>
   </div>
 </div>
 
-<!-- ── SESSION ANALYTICS OVERLAY ─────────────────────────────────────────────── -->
-<div id="analytics-overlay">
-  <div class="analytics-panel">
-    <div class="analytics-header">
-      <div class="analytics-header-text">
-        <h2 id="analytics-session-name">Session Analytics</h2>
-        <p id="analytics-session-meta"></p>
-      </div>
-      <button id="btn-close-analytics">✕ Close</button>
+<!-- ═══════════════════════════════════════════════════════
+     ADMIN PAGE  (full dedicated page, replaces main content)
+════════════════════════════════════════════════════════ -->
+<div id="admin-page" class="admin-page" style="display:none">
+  <div class="admin-page-inner">
+
+    <!-- Admin Header -->
+    <div class="admin-page-header">
+      <button class="btn btn-ghost" id="btn-back-to-dashboard">← Dashboard</button>
+      <h1 class="admin-page-title">Admin Dashboard</h1>
+      <span></span><!-- spacer -->
     </div>
 
-    <div id="analytics-loading" style="padding:40px;text-align:center;color:var(--text-muted);">Loading session data…</div>
-    <div id="analytics-error" style="display:none;padding:20px;color:var(--kshipta);"></div>
+    <!-- Tabs -->
+    <div class="admin-tabs">
+      <button class="admin-tab active" data-tab="users">Users</button>
+      <button class="admin-tab" data-tab="sessions">Sessions</button>
+    </div>
 
-    <div id="analytics-content" style="display:none; padding:20px;">
-
-      <!-- Summary stats -->
-      <div class="analytics-stat-grid">
-        <div class="analytics-stat">
-          <div class="analytics-stat-label">Epochs</div>
-          <div class="analytics-stat-val" id="a-total-epochs">—</div>
-        </div>
-        <div class="analytics-stat">
-          <div class="analytics-stat-label">Duration</div>
-          <div class="analytics-stat-val" id="a-duration">—</div>
-        </div>
-        <div class="analytics-stat">
-          <div class="analytics-stat-label">Dominant Guna</div>
-          <div class="analytics-stat-val" id="a-dominant-guna">—</div>
-        </div>
-        <div class="analytics-stat">
-          <div class="analytics-stat-label">Primary State</div>
-          <div class="analytics-stat-val" id="a-dominant-state">—</div>
-        </div>
+    <!-- ── Users Tab ── -->
+    <div id="admin-tab-users" class="admin-tab-panel">
+      <div class="admin-section-header">
+        <h2 class="admin-section-title">User Accounts</h2>
+        <button class="btn btn-primary btn-sm" id="btn-add-user">+ Add User</button>
       </div>
 
-      <!-- 2-col analytics grid -->
-      <div class="analytics-grid">
-
-        <!-- Trigunas -->
-        <div class="analytics-card">
-          <div class="analytics-card-title">Trigunas — Session Average</div>
-          <div class="ag-row"><span class="ag-label">☀ Sattva</span><div class="ag-bar-wrap"><div class="ag-bar ag-sattva" id="a-bar-sattva" style="width:0%"></div></div><span class="ag-pct" id="a-pct-sattva">—</span></div>
-          <div class="ag-row"><span class="ag-label">🔥 Rajas</span><div class="ag-bar-wrap"><div class="ag-bar ag-rajas"  id="a-bar-rajas"  style="width:0%"></div></div><span class="ag-pct" id="a-pct-rajas">—</span></div>
-          <div class="ag-row"><span class="ag-label">🌑 Tamas</span><div class="ag-bar-wrap"><div class="ag-bar ag-tamas"  id="a-bar-tamas"  style="width:0%"></div></div><span class="ag-pct" id="a-pct-tamas">—</span></div>
-        </div>
-
-        <!-- Chitta Bhumi Breakdown -->
-        <div class="analytics-card">
-          <div class="analytics-card-title">Chitta Bhumi Distribution</div>
-          <div id="a-state-breakdown"></div>
-        </div>
-
-        <!-- Swara Breakdown -->
-        <div class="analytics-card">
-          <div class="analytics-card-title">Swara Distribution</div>
-          <div id="a-swara-breakdown"></div>
-        </div>
-
-        <!-- Average Bands -->
-        <div class="analytics-card">
-          <div class="analytics-card-title">Average Band Powers</div>
-          <div id="a-avg-bands"></div>
-        </div>
-
-      </div><!-- end analytics-grid -->
-
-      <!-- Session Timeline -->
-      <div class="analytics-card" style="margin-bottom:14px;">
-        <div class="analytics-card-title">Session Timeline</div>
-        <p class="text-muted" style="font-size:11px;margin-bottom:10px;">Consecutive epochs in the same Chitta Bhumi state are grouped into phases.</p>
-        <div id="a-timeline"></div>
-      </div>
-
-      <!-- SESSION NOTES (visible to session owner and any admin) -->
-      <div id="a-notes-wrap" style="display:none">
-        <div class="a-notes-card analytics-card">
-          <div class="analytics-card-title">SESSION NOTES</div>
-          <textarea id="a-session-notes" readonly placeholder="No notes recorded for this session."></textarea>
-          <p class="a-notes-hint">Notes are read-only in the analytics view.</p>
-        </div>
-      </div>
-
-      <!-- REPLAY PLAYER -->
-      <div id="replay-player">
-        <div class="replay-title">⏮ Replay Session</div>
-        <div class="replay-controls">
-          <button class="replay-btn" id="replay-restart" title="Restart">⏮</button>
-          <button class="replay-btn" id="replay-back" title="Back 10s">⏪</button>
-          <button class="replay-btn" id="replay-play" title="Play/Pause">▶</button>
-          <button class="replay-btn" id="replay-fwd" title="Forward 10s">⏩</button>
-          <select id="replay-speed" title="Playback speed">
-            <option value="0.5">0.5×</option>
-            <option value="1" selected>1×</option>
-            <option value="2">2×</option>
-            <option value="4">4×</option>
+      <!-- Create user form -->
+      <div id="create-user-form" class="admin-form-card" style="display:none">
+        <div class="admin-form-row">
+          <input class="field-input" id="new-username" placeholder="Username" />
+          <input class="field-input" id="new-password" type="password" placeholder="Password" />
+          <select class="field-input" id="new-role">
+            <option value="user">User</option>
+            <option value="admin">Admin</option>
           </select>
+          <button class="btn btn-primary btn-sm" id="btn-create-user">Create</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-create-user">Cancel</button>
         </div>
-        <div class="replay-timeline">
-          <span class="replay-time" id="replay-current-time">0:00</span>
-          <input type="range" id="replay-slider" min="0" max="100" value="0" />
-          <span class="replay-time" id="replay-total-time">0:00</span>
-        </div>
-        <div class="replay-kbd-hint">
-          <kbd>Space</kbd> Play/Pause &nbsp;
-          <kbd>←</kbd> −10s &nbsp;
-          <kbd>→</kbd> +10s
+        <div id="create-user-error" class="form-error" style="display:none"></div>
+      </div>
+
+      <!-- Reset password form -->
+      <div id="reset-pw-form" class="admin-form-card" style="display:none">
+        <div class="admin-form-row">
+          <input class="field-input" id="reset-pw-input" type="password" placeholder="New password for user" />
+          <button class="btn btn-primary btn-sm" id="btn-save-reset-pw">Save</button>
+          <button class="btn btn-ghost btn-sm" id="btn-cancel-reset-pw">Cancel</button>
         </div>
       </div>
 
-    </div><!-- end analytics-content -->
-  </div><!-- end analytics-panel -->
-</div><!-- end analytics-overlay -->
+      <div class="table-wrapper">
+        <table class="admin-table">
+          <thead>
+            <tr>
+              <th>Username</th>
+              <th>Role</th>
+              <th>Created</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="admin-users-tbody">
+            <tr><td colspan="4" class="table-loading">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+    <!-- ── Sessions Tab ── -->
+    <div id="admin-tab-sessions" class="admin-tab-panel" style="display:none">
+      <div class="admin-section-header">
+        <h2 class="admin-section-title">All Sessions</h2>
+        <input class="field-input field-input-sm" id="admin-sessions-search"
+               placeholder="Search user…" style="max-width:200px" />
+      </div>
+
+      <div class="table-wrapper">
+        <table class="admin-table" id="admin-sessions-table">
+          <thead>
+            <tr>
+              <th>User</th>
+              <th>Session Name</th>
+              <th>Start</th>
+              <th>Duration</th>
+              <th>Epochs</th>
+              <th>Actions</th>
+            </tr>
+          </thead>
+          <tbody id="admin-sessions-tbody">
+            <tr><td colspan="6" class="table-loading">Loading…</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </div>
+
+  </div><!-- /admin-page-inner -->
+</div>
+
+<!-- ═══════════════════════════════════════════════════════
+     SESSION ANALYTICS MODAL
+     Overlays the admin page when a session is selected
+════════════════════════════════════════════════════════ -->
+<div id="analytics-overlay" class="analytics-overlay" style="display:none">
+  <div class="analytics-panel">
+
+    <div class="analytics-header">
+      <div>
+        <h2 class="analytics-title" id="analytics-session-name">Session Analytics</h2>
+        <p class="analytics-subtitle" id="analytics-session-meta"></p>
+      </div>
+      <button class="btn btn-ghost" id="btn-close-analytics">✕ Close</button>
+    </div>
+
+    <!-- Loading / error state -->
+    <div id="analytics-loading" class="analytics-loading">Loading session data…</div>
+    <div id="analytics-error" class="analytics-error" style="display:none"></div>
+
+    <!-- Analytics content (shown after load) -->
+    <div id="analytics-content" style="display:none">
+
+      <!-- Summary row -->
+      <div class="analytics-summary-row">
+        <div class="analytics-stat">
+          <span class="analytics-stat-value" id="a-total-epochs">—</span>
+          <span class="analytics-stat-label">Epochs</span>
+        </div>
+        <div class="analytics-stat">
+          <span class="analytics-stat-value" id="a-duration">—</span>
+          <span class="analytics-stat-label">Duration</span>
+        </div>
+        <div class="analytics-stat">
+          <span class="analytics-stat-value" id="a-dominant-guna">—</span>
+          <span class="analytics-stat-label">Dominant Guna</span>
+        </div>
+        <div class="analytics-stat">
+          <span class="analytics-stat-value" id="a-dominant-state">—</span>
+          <span class="analytics-stat-label">Primary State</span>
+        </div>
+      </div>
+
+      <!-- Gunas breakdown -->
+      <div class="analytics-section">
+        <div class="analytics-section-title">Trigunas — Session Average</div>
+        <div class="analytics-gunas-bars">
+          <div class="analytics-guna-row">
+            <span class="guna-label sattva-label-text">☀ Sattva</span>
+            <div class="analytics-bar-bg">
+              <div class="analytics-bar sattva-bar" id="a-bar-sattva"></div>
+            </div>
+            <span class="guna-pct" id="a-pct-sattva">—</span>
+          </div>
+          <div class="analytics-guna-row">
+            <span class="guna-label rajas-label-text">🔥 Rajas</span>
+            <div class="analytics-bar-bg">
+              <div class="analytics-bar rajas-bar" id="a-bar-rajas"></div>
+            </div>
+            <span class="guna-pct" id="a-pct-rajas">—</span>
+          </div>
+          <div class="analytics-guna-row">
+            <span class="guna-label tamas-label-text">🌑 Tamas</span>
+            <div class="analytics-bar-bg">
+              <div class="analytics-bar tamas-bar" id="a-bar-tamas"></div>
+            </div>
+            <span class="guna-pct" id="a-pct-tamas">—</span>
+          </div>
+        </div>
+      </div>
+
+      <!-- State Breakdown -->
+      <div class="analytics-section analytics-two-col">
+        <div>
+          <div class="analytics-section-title">Chitta Bhumi Distribution</div>
+          <div id="a-state-breakdown" class="analytics-breakdown-list"></div>
+        </div>
+        <div>
+          <div class="analytics-section-title">Swara Distribution</div>
+          <div id="a-swara-breakdown" class="analytics-breakdown-list"></div>
+        </div>
+      </div>
+
+      <!-- Band Powers Average -->
+      <div class="analytics-section">
+        <div class="analytics-section-title">Average Band Powers</div>
+        <div class="analytics-bands-row" id="a-avg-bands"></div>
+      </div>
+
+      <!-- Timeline of phases -->
+      <div class="analytics-section">
+        <div class="analytics-section-title">Session Timeline</div>
+        <p class="analytics-timeline-hint">Consecutive epochs in the same Chitta Bhumi state are grouped into phases.</p>
+        <div id="a-timeline" class="analytics-timeline"></div>
+      </div>
+
+
+      <!-- Session Notes (admin bug fix — notes now visible in analytics modal) -->
+      <div class="analytics-section" id="a-notes-section">
+        <div class="analytics-section-title">Session Notes</div>
+        <div id="a-notes-content" class="analytics-notes-content">
+          <em class="analytics-notes-empty">No notes recorded for this session.</em>
+        </div>
+      </div>
+
+      <!-- Epoch Replay Player -->
+      <div class="analytics-section" id="a-replay-section">
+        <div class="analytics-section-title">Epoch Replay</div>
+        <p class="analytics-timeline-hint">Step through recorded epochs to see how the EEG state evolved over time.</p>
+        <div class="replay-player">
+          <div class="replay-controls">
+            <button class="btn btn-ghost btn-sm replay-btn" id="replay-prev" title="Previous">⏮</button>
+            <button class="btn btn-primary btn-sm replay-btn" id="replay-play-pause">▶ Play</button>
+            <button class="btn btn-ghost btn-sm replay-btn" id="replay-next" title="Next">⏭</button>
+          </div>
+          <div class="replay-track">
+            <input type="range" id="replay-slider" class="replay-slider" min="0" max="0" value="0" />
+          </div>
+          <div class="replay-meta">
+            <span id="replay-epoch-label">—</span>
+            <span id="replay-time-label" class="replay-time">—</span>
+          </div>
+          <div class="replay-state-display" id="replay-state-display" style="display:none">
+            <div class="replay-state-row">
+              <span class="replay-state-key">State</span>
+              <span class="replay-state-val" id="replay-state-val">—</span>
+            </div>
+            <div class="replay-state-row">
+              <span class="replay-state-key">Swara</span>
+              <span class="replay-state-val" id="replay-swara-val">—</span>
+            </div>
+            <div class="replay-state-row">
+              <span class="replay-state-key">Dominant Guna</span>
+              <span class="replay-state-val" id="replay-guna-val">—</span>
+            </div>
+            <div class="replay-state-row">
+              <span class="replay-state-key">Alpha Power</span>
+              <span class="replay-state-val" id="replay-alpha-val">—</span>
+            </div>
+          </div>
+          <div id="replay-no-data" class="replay-no-data">No epoch data available for this session.</div>
+        </div>
+      </div>
+
+    </div><!-- /analytics-content -->
+  </div><!-- /analytics-panel -->
+</div>
 
 <script src="app.js"></script>
 </body>
