@@ -384,7 +384,30 @@ router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
   }
 });
 
-// ── Session Analytics ─────────────────────────────────────────────────────────
+// ── Session Epochs (list) ────────────────────────────────────────────────────────
+  /**
+   * GET /api/sessions/:id/epochs
+   * Returns all stored epochs for a session in order.
+   * Accessible by the session owner or any admin.
+   */
+  router.get('/sessions/:id/epochs', requireAuth, async (req, res) => {
+    try {
+      const sessionId = parseInt(req.params.id, 10);
+      const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]);
+      if (!sess) return res.status(404).json({ error: 'Session not found' });
+      if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
+        return res.status(403).json({ error: 'Forbidden' });
+      const { rows } = await pool.query(
+        'SELECT * FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC, recorded_at ASC',
+        [sessionId]
+      );
+      res.json(rows.map(mapEpoch));
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Session Analytics ─────────────────────────────────────────────────────────
 /**
  * GET /api/sessions/:id/analytics
  * Returns the full analytical summary for a session.
