@@ -791,6 +791,27 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); min-
     gap: 14px;
   }
 
+  .vital-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+  }
+
+  .vital-icon {
+    width: 28px;
+    height: 28px;
+    flex-shrink: 0;
+    opacity: 0.55;
+  }
+
+  .spo2-icon {
+    color: var(--ekagra);   /* teal-blue — air/oxygen */
+  }
+
+  .hr-icon {
+    color: var(--gamma);    /* coral-red — heart */
+  }
+
   .vital-display {
     display: flex;
     align-items: baseline;
