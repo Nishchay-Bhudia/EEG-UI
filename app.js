@@ -1111,6 +1111,14 @@ function processPPG() {
 }
 
 // ── Bluetooth connection ──────────────────────────────────────────────────────
+// btn-bt-scan = "Scan & Connect" inside the settings overlay
+$('btn-bt-scan').addEventListener('click', async () => {
+  $('settings-overlay').classList.remove('open');
+  await connectBluetooth();
+});
+// btn-bt-disconnect = inline disconnect row inside settings overlay
+$('btn-bt-disconnect').addEventListener('click', disconnectBluetooth);
+// btn-bluetooth = the mode button on the main dashboard card
 $('btn-bluetooth').addEventListener('click', async () => {
   if (mode === 'bluetooth') disconnectBluetooth();
   else await connectBluetooth();
