@@ -114,7 +114,9 @@ const mapEpoch = r => ({
     tamas:  r.tamas  ? parseFloat(r.tamas)  : null,
     label:  r.guna_label,
   },
-  tattvaFlags: r.tattva_flags || [],
+  tattvaFlags:  r.tattva_flags || [],
+  bloodOxygen:  r.blood_oxygen != null ? parseFloat(r.blood_oxygen) : null,
+  heartRate:    r.heart_rate   != null ? parseFloat(r.heart_rate)   : null,
 });
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -350,6 +352,8 @@ router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
       bands = {},
       gunas = {},
       tattvaFlags = [],
+      bloodOxygen,
+      heartRate,
     } = req.body;
 
     const { rows } = await pool.query(
@@ -359,14 +363,16 @@ router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
           swara, swara_confidence,
           delta_power, theta_power, alpha_power, beta_power, gamma_power,
           sattva, rajas, tamas, guna_label,
-          tattva_flags
+          tattva_flags,
+          blood_oxygen, heart_rate
         ) VALUES (
           $1, $2, $3,
           $4, $5, $6,
           $7, $8,
           $9, $10, $11, $12, $13,
           $14, $15, $16, $17,
-          $18
+          $18,
+          $19, $20
         ) RETURNING id`,
       [
         sessionId, epochNum || null, elapsedSeconds || null,
@@ -376,6 +382,8 @@ router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
         bands.beta  ?? null, bands.gamma ?? null,
         gunas.sattva ?? null, gunas.rajas ?? null, gunas.tamas ?? null, gunas.label || null,
         JSON.stringify(tattvaFlags),
+        bloodOxygen != null ? parseFloat(bloodOxygen) : null,
+        heartRate   != null ? parseFloat(heartRate)   : null,
       ]
     );
     res.status(201).json({ ok: true, epochId: rows[0].id });
