@@ -1072,6 +1072,8 @@ function startDemo() {
       alpha_asymmetry: asym,
       tattva_flags: [],
       contemplative_depth: CHITTA_DEPTHS[state],
+      blood_oxygen: +(97.5 + (state === 'Niruddha' ? 1.0 : state === 'Ekagra' ? 0.5 : 0) + (Math.random() * 0.8 - 0.4)).toFixed(1),
+      heart_rate:   +(state === 'Kshipta' ? 78 + Math.random()*8 : state === 'Vikshipta' ? 70 + Math.random()*7 : state === 'Ekagra' ? 62 + Math.random()*6 : 56 + Math.random()*5).toFixed(1),
     });
 
     // Advance state every few ticks
