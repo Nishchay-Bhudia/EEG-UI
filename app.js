@@ -772,6 +772,9 @@ function applyReading(r) {
   // ── Trigunas ──
   applyGunas(r.gunas);
 
+  // ── Vitals (SpO₂ / Heart Rate) ──
+  applyVitals(r.blood_oxygen ?? null, r.heart_rate ?? null);
+
   // ── Store epoch to DB (if session active) ──
   if (activeSession) {
     storeEpoch(r, spectrum, flags);
@@ -806,6 +809,38 @@ function applyGunas(gunas) {
 
   $('gunas-dominant').textContent = label || '—';
   $('gunas-note').textContent     = note  || '';
+}
+
+/**
+ * applyVitals — update the SpO₂ and Heart Rate widgets.
+ * bloodOxygen: number (%) or null if device does not support it.
+ * heartRate  : number (BPM) or null if device does not support it.
+ * When null the widget shows '—' and status 'not available'.
+ */
+function applyVitals(bloodOxygen, heartRate) {
+  const spo2El  = $('val-spo2');
+  const spo2Sts = $('spo2-status');
+  if (spo2El) {
+    if (bloodOxygen != null) {
+      spo2El.textContent  = Number(bloodOxygen).toFixed(1);
+      if (spo2Sts) spo2Sts.textContent = 'live';
+    } else {
+      spo2El.textContent  = '—';
+      if (spo2Sts) spo2Sts.textContent = 'not available';
+    }
+  }
+
+  const hrEl  = $('val-hr');
+  const hrSts = $('hr-status');
+  if (hrEl) {
+    if (heartRate != null) {
+      hrEl.textContent  = Math.round(heartRate);
+      if (hrSts) hrSts.textContent = 'live';
+    } else {
+      hrEl.textContent  = '—';
+      if (hrSts) hrSts.textContent = 'not available';
+    }
+  }
 }
 
 /**
@@ -875,7 +910,9 @@ async function storeEpoch(r, spectrum, flags) {
       tamas:  gunas.tamas  ?? null,
       label:  gunas.label  || null,
     },
-    tattvaFlags: flags || [],
+    tattvaFlags:  flags || [],
+    bloodOxygen:  r.blood_oxygen != null ? r.blood_oxygen : null,
+    heartRate:    r.heart_rate   != null ? r.heart_rate   : null,
   };
 
   // Fire-and-forget — don't block the UI
