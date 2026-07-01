@@ -573,6 +573,12 @@ function buildAnalyticsSummary(epochs, sess) {
   }
   if (currentPhase) phases.push(finalizePhase(currentPhase));
 
+  // Average blood oxygen and heart rate (only from epochs where value was recorded)
+  const boVals = epochs.map(e => e.bloodOxygen).filter(v => v != null);
+  const hrVals = epochs.map(e => e.heartRate).filter(v => v != null);
+  const avgBloodOxygen = boVals.length ? +(boVals.reduce((a, b) => a + b, 0) / boVals.length).toFixed(1) : null;
+  const avgHeartRate   = hrVals.length ? +(hrVals.reduce((a, b) => a + b, 0) / hrVals.length).toFixed(1) : null;
+
   return {
     totalEpochs: epochs.length,
     durationSeconds: sess.duration_seconds || null,
@@ -581,6 +587,8 @@ function buildAnalyticsSummary(epochs, sess) {
     dominantGuna,
     stateBreakdown,
     swaraBreakdown,
+    avgBloodOxygen,
+    avgHeartRate,
     phases,
   };
 }
