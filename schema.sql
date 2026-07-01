@@ -47,3 +47,41 @@ CREATE TABLE IF NOT EXISTS user_sessions (
   CONSTRAINT session_pkey PRIMARY KEY (sid)
 );
 CREATE INDEX IF NOT EXISTS idx_session_expire ON user_sessions (expire);
+
+-- 6. Session epochs — per-epoch EEG data stored during live sessions
+--    Each epoch is one ~2-second inference window.
+--    This table powers the admin session analytics view.
+CREATE TABLE IF NOT EXISTS session_epochs (
+  id                  SERIAL PRIMARY KEY,
+  session_id          INTEGER NOT NULL REFERENCES eeg_sessions(id) ON DELETE CASCADE,
+  epoch_num           INTEGER NOT NULL,               -- 1-based counter within session
+  recorded_at         TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+  elapsed_seconds     NUMERIC(10,2),                  -- seconds since session start
+
+  -- Chitta Bhumi
+  chitta_bhumi        TEXT,                           -- Kshipta | Vikshipta | Ekagra | Niruddha
+  chitta_confidence   TEXT,                           -- e.g. "82.4%"
+  contemplative_depth TEXT,                           -- Surface | Emerging | Deep | Profound
+
+  -- Swara Nadi
+  swara               TEXT,                           -- Ida | Pingala | Sushumna
+  swara_confidence    TEXT,
+
+  -- Relative band powers (0..1)
+  delta_power         NUMERIC(8,6),
+  theta_power         NUMERIC(8,6),
+  alpha_power         NUMERIC(8,6),
+  beta_power          NUMERIC(8,6),
+  gamma_power         NUMERIC(8,6),
+
+  -- Trigunas (0..1, sum to 1)
+  sattva              NUMERIC(8,6),
+  rajas               NUMERIC(8,6),
+  tamas               NUMERIC(8,6),
+  guna_label          TEXT,                           -- Sattvic | Rajasic | Tamasic | Balanced
+
+  -- Tattva flags (JSON array of strings)
+  tattva_flags        JSONB NOT NULL DEFAULT '[]'
+);
+
+CREATE INDEX IF NOT EXISTS idx_epoch_session ON session_epochs (session_id, epoch_num);
