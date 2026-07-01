@@ -1,22 +1,21 @@
 /* ════════════════════════════════════════════════════════════════════════════
- EEG DEV TESTING — app.js
- Modes: demo | bluetooth+backend | bluetooth-local | backend-url
- Auth: Login → Session management → Admin dashboard (dedicated page)
- New: Trigunas display, Session epoch storage, Admin session analytics,
-      BT Wizard connection flow, Session Replay player
+   EEG DEV TESTING — app.js
+   Modes: demo | bluetooth+backend | bluetooth-local | backend-url
+   Auth: Login → Session management → Admin dashboard (dedicated page)
+   New: Trigunas display, Session epoch storage, Admin session analytics
 ════════════════════════════════════════════════════════════════════════════ */
 
 'use strict';
 
 // ── Constants ─────────────────────────────────────────────────────────────────
-const SAMPLE_RATE = 256;
+const SAMPLE_RATE  = 256;
 const COLLECT_SECS = 2;
-const COLLECT_N = SAMPLE_RATE * COLLECT_SECS;
-const WAVE_LEN = 300;
+const COLLECT_N    = SAMPLE_RATE * COLLECT_SECS;
+const WAVE_LEN     = 300;
 const DEMO_INTERVAL = 1200;
 
-const MUSE_SERVICE_UUID = '0000fe8d-0000-1000-8000-00805f9b34fb';
-const MUSE_CONTROL_UUID = '273e0001-4c4d-454d-96be-f03bac821358';
+const MUSE_SERVICE_UUID  = '0000fe8d-0000-1000-8000-00805f9b34fb';
+const MUSE_CONTROL_UUID  = '273e0001-4c4d-454d-96be-f03bac821358';
 const MUSE_EEG_UUIDS = [
   '273e0003-4c4d-454d-96be-f03bac821358',
   '273e0004-4c4d-454d-96be-f03bac821358',
@@ -24,65 +23,61 @@ const MUSE_EEG_UUIDS = [
   '273e0006-4c4d-454d-96be-f03bac821358',
 ];
 
-const DEPTH_PCT = { Surface: 12, Emerging: 37, Deep: 62, Profound: 94 };
+const DEPTH_PCT    = { Surface: 12, Emerging: 37, Deep: 62, Profound: 94 };
 const CHITTA_DEPTHS = { Kshipta: 'Surface', Vikshipta: 'Emerging', Ekagra: 'Deep', Niruddha: 'Profound' };
 const SWARA_NOTES = {
-  ida: 'Parasympathetic dominance. Receptive, creative and introspective state.',
-  pingala: 'Sympathetic dominance. Active, analytical and goal-directed focus.',
+  ida:      'Parasympathetic dominance. Receptive, creative and introspective state.',
+  pingala:  'Sympathetic dominance. Active, analytical and goal-directed focus.',
   sushumna: 'Equilibrium of solar and lunar channels. Gateway to higher contemplative states.',
 };
 
 // ── App state ─────────────────────────────────────────────────────────────────
-let mode = 'idle';
-let backendUrl = localStorage.getItem('controlhub_url') || 'https://eeg-backend-5.onrender.com';
-let btDevice = null;
-let btDisconnect = null;
-let demoTimer = null;
-let epoch = 0;
-let demoStateIdx = 0;
-let demoSwaraIdx = 0;
-let demoEpoch = 0;
-let pollTimer = null;
-let sseSource = null;
+let mode            = 'idle';
+let backendUrl      = localStorage.getItem('controlhub_url') || 'https://eeg-backend-5.onrender.com';
+let btDevice        = null;
+let btDisconnect    = null;
+let demoTimer       = null;
+let epoch           = 0;
+let demoStateIdx    = 0;
+let demoSwaraIdx    = 0;
+let demoEpoch       = 0;
+let pollTimer       = null;
+let sseSource       = null;
 let backendPollTimer = null;
 
 // Auth state
 let currentUser = null; // { id, username, role }
 
 // Session state
-let activeSession = null; // { id, name, startTime }
-let sessionTimerInterval = null;
-let notesSaveTimeout = null;
-let sessionEpochCounter = 0;
-let sessionStartTimestamp = null;
+let activeSession         = null; // { id, name, startTime }
+let sessionTimerInterval  = null;
+let notesSaveTimeout      = null;
+let sessionEpochCounter   = 0;   // epoch counter within current session
+let sessionStartTimestamp = null; // Date object when session started
 
 // Admin page state
-let adminCurrentTab = 'users';
+let adminCurrentTab     = 'users';
 let resetPwTargetUserId = null;
 
 const bleChannels = [[], [], [], []];
-let blePhase = 0;
+let blePhase   = 0;
 let bleSamTick = 0;
 
-const waveBuf = new Float32Array(WAVE_LEN);
-let waveTail = 0;
-let wavePhase = 0;
+const waveBuf  = new Float32Array(WAVE_LEN);
+let waveTail   = 0;
+let wavePhase  = 0;
 
-// ── BT Wizard state machine ───────────────────────────────────────────────────
-// States: idle | pairing | device_connected | waiting_for_signal | signal_detected | countdown | analysing
-let btWizardState = 'idle';
+// BT Wizard state
+let btWizardPhase          = 'idle'; // idle | pairing | waiting | countdown | done | error
 let btWizardCountdownTimer = null;
-let btWizardSignalCheckTimer = null;
-let btWizardEpochCount = 0; // epochs received since device connected
-const BT_SIGNAL_THRESHOLD = 3; // epochs needed before countdown
+let btWizardQualityTimer   = null;
 
-// ── Replay state ──────────────────────────────────────────────────────────────
-let replayEpochs = [];       // all epochs for current replay session
-let replayCurrentIdx = 0;   // current epoch index
-let replayPlaying = false;
-let replaySpeed = 1;
-let replayTimer = null;
-let replaySessionDuration = 0; // total duration in seconds
+// Replay Player state
+let replayEpochs              = [];
+let replayIndex               = 0;
+let replayTimer               = null;
+let replayPlaying             = false;
+let currentAnalyticsSessionId = null;
 
 // ── DOM refs ──────────────────────────────────────────────────────────────────
 const $ = id => document.getElementById(id);
@@ -125,7 +120,7 @@ async function api(method, path, body) {
     headers: { 'Content-Type': 'application/json' },
   };
   if (body !== undefined) opts.body = JSON.stringify(body);
-  const res = await fetch('/api' + path, opts);
+  const res  = await fetch('/api' + path, opts);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw Object.assign(new Error(data.error || 'Request failed'), { status: res.status });
   return data;
@@ -142,24 +137,26 @@ async function checkAuth() {
 }
 
 function showLoginScreen() {
-  $('login-screen').style.display = 'flex';
-  $('main-header').style.display = 'none';
-  $('main-content').style.display = 'none';
-  $('admin-page').style.display = 'none';
+  $('login-screen').style.display    = 'flex';
+  $('main-header').style.display     = 'none';
+  $('main-content').style.display    = 'none';
+  $('admin-page').style.display      = 'none';
 }
 
 function showMainApp() {
-  $('login-screen').style.display = 'none';
-  $('main-header').style.display = '';
-  $('main-content').style.display = '';
-  $('admin-page').style.display = 'none';
+  $('login-screen').style.display    = 'none';
+  $('main-header').style.display     = '';
+  $('main-content').style.display    = '';
+  $('admin-page').style.display      = 'none';
 
+  // Update user menu
   $('user-avatar-initial').textContent = (currentUser.username[0] || '?').toUpperCase();
-  $('user-display-name').textContent = currentUser.username;
-  $('user-menu-role').textContent = currentUser.role;
+  $('user-display-name').textContent   = currentUser.username;
+  $('user-menu-role').textContent      = currentUser.role;
 
   $('btn-open-admin').style.display = currentUser.role === 'admin' ? '' : 'none';
 
+  // Start canvas
   resizeCanvas();
   requestAnimationFrame(drawWave);
   $('val-buffer').textContent = '0 / ' + COLLECT_N;
@@ -174,9 +171,11 @@ function showMainApp() {
 
 function showAdminPage() {
   $('login-screen').style.display = 'none';
-  $('main-header').style.display = '';
+  $('main-header').style.display  = '';
   $('main-content').style.display = 'none';
-  $('admin-page').style.display = '';
+  $('admin-page').style.display   = '';
+
+  // Load the active admin tab
   openAdminTab(adminCurrentTab);
 }
 
@@ -184,7 +183,7 @@ function showAdminPage() {
 $('btn-login').addEventListener('click', async () => {
   const username = $('input-username').value.trim();
   const password = $('input-password').value;
-  const errEl = $('login-error');
+  const errEl    = $('login-error');
   errEl.style.display = 'none';
   $('btn-login').disabled = true;
   $('btn-login').textContent = 'Signing in…';
@@ -193,10 +192,10 @@ $('btn-login').addEventListener('click', async () => {
     currentUser = await api('POST', '/auth/login', { username, password });
     showMainApp();
   } catch (err) {
-    errEl.textContent = err.message || 'Login failed';
-    errEl.style.display = '';
+    errEl.textContent    = err.message || 'Login failed';
+    errEl.style.display  = '';
   } finally {
-    $('btn-login').disabled = false;
+    $('btn-login').disabled    = false;
     $('btn-login').textContent = 'Sign In';
   }
 });
@@ -218,8 +217,8 @@ document.addEventListener('click', () => {
 
 $('btn-logout').addEventListener('click', async () => {
   await api('POST', '/auth/logout').catch(() => {});
-  currentUser = null;
-  activeSession = null;
+  currentUser    = null;
+  activeSession  = null;
   clearInterval(sessionTimerInterval);
   showLoginScreen();
 });
@@ -238,14 +237,14 @@ $('settings-overlay').addEventListener('click', e => {
 });
 
 $('btn-test').addEventListener('click', async () => {
-  const url = $('input-backend-url').value.trim().replace(/\/$/, '');
+  const url    = $('input-backend-url').value.trim().replace(/\/$/, '');
   const testEl = $('test-msg');
   if (!url) { alert('Enter a URL first.'); return; }
   testEl.style.display = '';
-  testEl.style.color = 'var(--text-muted)';
-  testEl.textContent = 'Testing…';
+  testEl.style.color   = 'var(--text-muted)';
+  testEl.textContent   = 'Testing…';
   try {
-    const res = await fetch(url + '/status', { signal: AbortSignal.timeout(5000) });
+    const res  = await fetch(url + '/status', { signal: AbortSignal.timeout(5000) });
     const data = await res.json();
     testEl.style.color = '#56A67A';
     testEl.textContent = '✓ Connected — board: ' + (data.board || 'unknown');
@@ -265,29 +264,40 @@ $('btn-save').addEventListener('click', () => {
 });
 
 // ── Admin page navigation ─────────────────────────────────────────────────────
-$('btn-open-admin').addEventListener('click', () => { showAdminPage(); });
-$('btn-back-to-dashboard').addEventListener('click', () => { showMainApp(); });
+$('btn-open-admin').addEventListener('click', () => {
+  showAdminPage();
+});
 
+$('btn-back-to-dashboard').addEventListener('click', () => {
+  showMainApp();
+});
+
+// Admin tab switching
 qAll('.admin-tab').forEach(tab => {
-  tab.addEventListener('click', () => { openAdminTab(tab.dataset.tab); });
+  tab.addEventListener('click', () => {
+    openAdminTab(tab.dataset.tab);
+  });
 });
 
 function openAdminTab(tabName) {
   adminCurrentTab = tabName;
+
   qAll('.admin-tab').forEach(t => t.classList.toggle('active', t.dataset.tab === tabName));
-  $('admin-tab-users').style.display = tabName === 'users' ? '' : 'none';
+
+  $('admin-tab-users').style.display    = tabName === 'users'    ? '' : 'none';
   $('admin-tab-sessions').style.display = tabName === 'sessions' ? '' : 'none';
-  if (tabName === 'users') loadAdminUsers();
+
+  if (tabName === 'users')    loadAdminUsers();
   if (tabName === 'sessions') loadAdminSessions();
 }
 
 // ── Admin: Users tab ──────────────────────────────────────────────────────────
 $('btn-add-user').addEventListener('click', () => {
-  $('create-user-form').style.display = '';
-  $('create-user-error').style.display = 'none';
-  $('new-username').value = '';
-  $('new-password').value = '';
-  $('new-role').value = 'user';
+  $('create-user-form').style.display    = '';
+  $('create-user-error').style.display   = 'none';
+  $('new-username').value  = '';
+  $('new-password').value  = '';
+  $('new-role').value      = 'user';
 });
 
 $('btn-cancel-create-user').addEventListener('click', () => {
@@ -297,12 +307,12 @@ $('btn-cancel-create-user').addEventListener('click', () => {
 $('btn-create-user').addEventListener('click', async () => {
   const username = $('new-username').value.trim();
   const password = $('new-password').value;
-  const role = $('new-role').value;
-  const errEl = $('create-user-error');
+  const role     = $('new-role').value;
+  const errEl    = $('create-user-error');
   errEl.style.display = 'none';
 
   if (!username || !password) {
-    errEl.textContent = 'Username and password required.';
+    errEl.textContent   = 'Username and password required.';
     errEl.style.display = '';
     return;
   }
@@ -312,7 +322,7 @@ $('btn-create-user').addEventListener('click', async () => {
     $('create-user-form').style.display = 'none';
     await loadAdminUsers();
   } catch (err) {
-    errEl.textContent = err.message;
+    errEl.textContent   = err.message;
     errEl.style.display = '';
   }
 });
@@ -329,8 +339,8 @@ $('btn-save-reset-pw').addEventListener('click', async () => {
   try {
     await api('PUT', '/users/' + resetPwTargetUserId + '/password', { password: pw });
     $('reset-pw-form').style.display = 'none';
-    resetPwTargetUserId = null;
-    $('reset-pw-input').value = '';
+    resetPwTargetUserId              = null;
+    $('reset-pw-input').value        = '';
     alert('Password updated.');
   } catch (err) {
     alert('Error: ' + err.message);
@@ -339,44 +349,45 @@ $('btn-save-reset-pw').addEventListener('click', async () => {
 
 async function loadAdminUsers() {
   const tbody = $('admin-users-tbody');
-  tbody.innerHTML = '<tr><td colspan="4">Loading…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="4" class="table-loading">Loading…</td></tr>';
   try {
     const users = await api('GET', '/users');
     tbody.innerHTML = '';
     if (!users.length) {
-      tbody.innerHTML = '<tr><td colspan="4">No users found.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="4" class="table-loading">No users found.</td></tr>';
       return;
     }
     users.forEach(u => {
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><strong>${escHtml(u.username)}</strong></td>
-        <td><span class="role-badge">${escHtml(u.role)}</span></td>
+        <td><span class="role-badge role-${u.role}">${escHtml(u.role)}</span></td>
         <td>${formatDate(u.createdAt)}</td>
         <td>
-          <button class="btn-sm" data-action="reset-pw" data-uid="${u.id}">Reset PW</button>
-          ${u.id !== currentUser.id
-            ? `<button class="btn-sm btn-danger" data-action="delete-user" data-uid="${u.id}">Delete</button>`
-            : '<span class="text-muted">(you)</span>'
-          }
-        </td>
-      `;
+          <div class="table-actions">
+            <button class="btn btn-ghost btn-sm" data-action="reset-pw" data-uid="${u.id}">Reset PW</button>
+            ${u.id !== currentUser.id
+              ? `<button class="btn btn-danger btn-sm" data-action="delete-user" data-uid="${u.id}">Delete</button>`
+              : '<span style="font-size:11px;color:var(--text-muted)">(you)</span>'
+            }
+          </div>
+        </td>`;
       tbody.appendChild(tr);
     });
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="4" class="error">${escHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="4" class="table-error">${escHtml(err.message)}</td></tr>`;
   }
 }
 
 $('admin-users-tbody').addEventListener('click', async e => {
   const btn = e.target.closest('[data-action]');
   if (!btn) return;
-  const uid = parseInt(btn.dataset.uid, 10);
+  const uid    = parseInt(btn.dataset.uid, 10);
   const action = btn.dataset.action;
 
   if (action === 'reset-pw') {
-    resetPwTargetUserId = uid;
-    $('reset-pw-input').value = '';
+    resetPwTargetUserId          = uid;
+    $('reset-pw-input').value    = '';
     $('reset-pw-form').style.display = '';
     $('reset-pw-input').focus();
   } else if (action === 'delete-user') {
@@ -401,12 +412,12 @@ $('admin-sessions-search').addEventListener('input', e => {
 
 async function loadAdminSessions() {
   const tbody = $('admin-sessions-tbody');
-  tbody.innerHTML = '<tr><td colspan="6">Loading…</td></tr>';
+  tbody.innerHTML = '<tr><td colspan="6" class="table-loading">Loading…</td></tr>';
   try {
     const sessions = await api('GET', '/sessions');
     tbody.innerHTML = '';
     if (!sessions.length) {
-      tbody.innerHTML = '<tr><td colspan="6">No sessions yet.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="6" class="table-loading">No sessions yet.</td></tr>';
       return;
     }
     sessions.forEach(s => {
@@ -417,23 +428,30 @@ async function loadAdminSessions() {
         <td><strong>${escHtml(s.name)}</strong></td>
         <td>${formatDate(s.startTime)}</td>
         <td>${s.duration ? formatDuration(s.duration) : (s.endTime ? '—' : '<em>active</em>')}</td>
-        <td id="epoch-count-${s.id}">—</td>
-        <td><button class="btn-sm" data-action="view-analytics" data-sid="${s.id}" data-sname="${escHtml(s.name)}">View Analytics</button></td>
-      `;
+        <td><span class="epoch-badge" id="epoch-count-${s.id}">—</span></td>
+        <td>
+          <div class="table-actions">
+            <button class="btn btn-secondary btn-sm" data-action="view-analytics" data-sid="${s.id}" data-sname="${escHtml(s.name)}">
+              View Analytics
+            </button>
+          </div>
+        </td>`;
       tbody.appendChild(tr);
     });
 
+    // Load epoch counts in background (best-effort)
     loadEpochCounts(sessions);
   } catch (err) {
-    tbody.innerHTML = `<tr><td colspan="6" class="error">${escHtml(err.message)}</td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="6" class="table-error">${escHtml(err.message)}</td></tr>`;
   }
 }
 
 async function loadEpochCounts(sessions) {
+  // Fire all analytics requests, pick only epoch count from summary
   await Promise.allSettled(sessions.map(async s => {
     try {
       const data = await api('GET', '/sessions/' + s.id + '/analytics');
-      const el = $('epoch-count-' + s.id);
+      const el   = $('epoch-count-' + s.id);
       if (el) el.textContent = data.summary?.totalEpochs ?? 0;
     } catch { /* ignore */ }
   }));
@@ -442,7 +460,7 @@ async function loadEpochCounts(sessions) {
 $('admin-sessions-tbody').addEventListener('click', async e => {
   const btn = e.target.closest('[data-action="view-analytics"]');
   if (!btn) return;
-  const sid = parseInt(btn.dataset.sid, 10);
+  const sid   = parseInt(btn.dataset.sid, 10);
   const sname = btn.dataset.sname;
   openSessionAnalytics(sid, sname);
 });
@@ -450,72 +468,57 @@ $('admin-sessions-tbody').addEventListener('click', async e => {
 // ── Session Analytics Overlay ─────────────────────────────────────────────────
 $('btn-close-analytics').addEventListener('click', () => {
   $('analytics-overlay').style.display = 'none';
-  stopReplay();
 });
 
 $('analytics-overlay').addEventListener('click', e => {
-  if (e.target === $('analytics-overlay')) {
-    $('analytics-overlay').style.display = 'none';
-    stopReplay();
-  }
+  if (e.target === $('analytics-overlay')) $('analytics-overlay').style.display = 'none';
 });
 
 async function openSessionAnalytics(sessionId, sessionName) {
   const overlay = $('analytics-overlay');
   overlay.style.display = 'flex';
-  stopReplay();
 
+  currentAnalyticsSessionId = sessionId;
   $('analytics-session-name').textContent = sessionName || 'Session Analytics';
   $('analytics-session-meta').textContent = '';
-  $('analytics-loading').style.display = '';
-  $('analytics-error').style.display = 'none';
-  $('analytics-content').style.display = 'none';
-
-  // Reset notes area
-  const notesEl = $('a-session-notes');
-  if (notesEl) notesEl.value = '';
-  const notesWrap = $('a-notes-wrap');
-  if (notesWrap) notesWrap.style.display = 'none';
+  $('analytics-loading').style.display    = '';
+  $('analytics-error').style.display      = 'none';
+  $('analytics-content').style.display    = 'none';
+  stopReplay();
 
   try {
-    // Fetch analytics and notes in parallel
-    const [data, notesData] = await Promise.all([
+    // Fetch analytics + notes in parallel; notes failure is non-fatal
+    const [analyticsResult, notesResult] = await Promise.allSettled([
       api('GET', '/sessions/' + sessionId + '/analytics'),
-      api('GET', '/sessions/' + sessionId + '/notes').catch(() => ({ content: '' })),
+      api('GET', '/sessions/' + sessionId + '/notes'),
     ]);
-
-    renderSessionAnalytics(data);
-
-    // Show notes (admin can read anyone's; users read their own)
-    if (notesEl && notesWrap) {
-      notesEl.value = notesData.content || '';
-      notesWrap.style.display = '';
-    }
-
-    // Set up replay using epoch data
-    if (data.epochs && data.epochs.length > 0) {
-      setupReplay(data.epochs, data.session);
-    }
+    if (analyticsResult.status === 'rejected') throw analyticsResult.reason;
+    const noteContent = notesResult.status === 'fulfilled'
+      ? (notesResult.value.content || '') : '';
+    renderSessionAnalytics(analyticsResult.value, noteContent);
   } catch (err) {
     $('analytics-loading').style.display = 'none';
-    $('analytics-error').style.display = '';
-    $('analytics-error').textContent = 'Failed to load analytics: ' + err.message;
+    $('analytics-error').style.display   = '';
+    $('analytics-error').textContent     = 'Failed to load analytics: ' + err.message;
   }
 }
 
-function renderSessionAnalytics(data) {
+function renderSessionAnalytics(data, noteContent) {
   const { session, summary } = data;
-  $('analytics-loading').style.display = 'none';
-  $('analytics-content').style.display = '';
+  $('analytics-loading').style.display  = 'none';
+  $('analytics-content').style.display  = '';
 
+  // Meta subtitle
   $('analytics-session-name').textContent = session.name;
   $('analytics-session-meta').textContent =
     `${session.username || '?'} · ${formatDate(session.startTime)}` +
     (session.duration ? ` · ${formatDuration(session.duration)}` : '');
 
-  $('a-total-epochs').textContent = summary.totalEpochs ?? '—';
-  $('a-duration').textContent = summary.durationSeconds ? formatDuration(summary.durationSeconds) : '—';
+  // ── Summary stats ──
+  $('a-total-epochs').textContent  = summary.totalEpochs ?? '—';
+  $('a-duration').textContent      = summary.durationSeconds ? formatDuration(summary.durationSeconds) : '—';
 
+  // Dominant guna
   const gunaLabel = summary.dominantGuna
     ? summary.dominantGuna.charAt(0).toUpperCase() + summary.dominantGuna.slice(1)
     : '—';
@@ -524,29 +527,42 @@ function renderSessionAnalytics(data) {
     : summary.dominantGuna === 'rajas' ? 'var(--rajas)'
     : summary.dominantGuna === 'tamas' ? 'var(--tamas)' : 'var(--text)';
 
+  // Dominant Chitta Bhumi
   const stateEntries = Object.entries(summary.stateBreakdown || {}).sort((a, b) => b[1] - a[1]);
   $('a-dominant-state').textContent = stateEntries[0]?.[0] ?? '—';
 
+  // ── Gunas bars ──
   const avgGunas = summary.avgGunas || {};
   setAnalyticsGuna('sattva', avgGunas.sattva);
-  setAnalyticsGuna('rajas', avgGunas.rajas);
-  setAnalyticsGuna('tamas', avgGunas.tamas);
+  setAnalyticsGuna('rajas',  avgGunas.rajas);
+  setAnalyticsGuna('tamas',  avgGunas.tamas);
 
+  // ── State breakdown ──
   const stateColors = { Kshipta: 'var(--kshipta)', Vikshipta: 'var(--vikshipta)', Ekagra: 'var(--ekagra)', Niruddha: 'var(--niruddha)' };
   renderBreakdownList('a-state-breakdown', summary.stateBreakdown || {}, stateColors);
 
+  // ── Swara breakdown ──
   const swaraColors = { Ida: 'var(--ida)', Pingala: 'var(--pingala)', Sushumna: 'var(--sushumna)' };
   renderBreakdownList('a-swara-breakdown', summary.swaraBreakdown || {}, swaraColors);
 
+  // ── Avg bands ──
   renderAvgBands(summary.avgBands || {});
+
+  // ── Timeline of phases ──
   renderTimeline(summary.phases || []);
+
+  // ── Session Notes (admin bug fix) ──
+  renderAnalyticsNotes(noteContent || '');
+
+  // ── Epoch Replay Player ──
+  setupReplayPlayer();
 }
 
 function setAnalyticsGuna(name, value) {
   const pct = value != null ? (value * 100).toFixed(1) : null;
-  const bar = $('a-bar-' + name);
+  const bar  = $('a-bar-' + name);
   const pctEl = $('a-pct-' + name);
-  if (bar) bar.style.width = pct ? pct + '%' : '0%';
+  if (bar)   bar.style.width   = pct ? pct + '%' : '0%';
   if (pctEl) pctEl.textContent = pct ? pct + '%' : '—';
 }
 
@@ -556,7 +572,7 @@ function renderBreakdownList(containerId, breakdown, colorMap) {
   el.innerHTML = '';
   const entries = Object.entries(breakdown).sort((a, b) => b[1] - a[1]);
   if (!entries.length) {
-    el.innerHTML = '<p class="text-muted">No data</p>';
+    el.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">No data</div>';
     return;
   }
   entries.forEach(([label, pct]) => {
@@ -565,7 +581,9 @@ function renderBreakdownList(containerId, breakdown, colorMap) {
     div.className = 'breakdown-item';
     div.innerHTML = `
       <span class="breakdown-label">${escHtml(label)}</span>
-      <div class="breakdown-bar-wrap"><div class="breakdown-bar" style="width:${pct}%;background:${color}"></div></div>
+      <div class="breakdown-bar-bg">
+        <div class="breakdown-bar" style="width:${pct}%;background:${color}"></div>
+      </div>
       <span class="breakdown-pct">${pct}%</span>`;
     el.appendChild(div);
   });
@@ -579,15 +597,18 @@ function renderAvgBands(bands) {
     { key: 'delta', sym: 'δ', name: 'Delta', color: 'var(--delta)' },
     { key: 'theta', sym: 'θ', name: 'Theta', color: 'var(--theta)' },
     { key: 'alpha', sym: 'α', name: 'Alpha', color: 'var(--alpha)' },
-    { key: 'beta',  sym: 'β', name: 'Beta',  color: 'var(--beta)' },
+    { key: 'beta',  sym: 'β', name: 'Beta',  color: 'var(--beta)'  },
     { key: 'gamma', sym: 'γ', name: 'Gamma', color: 'var(--gamma)' },
   ];
   defs.forEach(({ key, sym, name, color }) => {
-    const val = bands[key];
-    const pct = val != null ? (val * 100).toFixed(1) + '%' : '—';
-    const div = document.createElement('div');
+    const val  = bands[key];
+    const pct  = val != null ? (val * 100).toFixed(1) + '%' : '—';
+    const div  = document.createElement('div');
     div.className = 'analytics-band-pill';
-    div.innerHTML = `<span class="band-sym" style="color:${color}">${sym}</span><span class="band-name">${name}</span><span class="band-val">${pct}</span>`;
+    div.innerHTML = `
+      <span class="analytics-band-sym" style="color:${color}">${sym}</span>
+      <span class="analytics-band-name">${name}</span>
+      <span class="analytics-band-val">${pct}</span>`;
     container.appendChild(div);
   });
 }
@@ -598,7 +619,7 @@ function renderTimeline(phases) {
   container.innerHTML = '';
 
   if (!phases.length) {
-    container.innerHTML = '<p class="text-muted">No epoch data recorded for this session.</p>';
+    container.innerHTML = '<div style="font-size:12px;color:var(--text-muted);padding:12px 0">No epoch data recorded for this session.</div>';
     return;
   }
 
@@ -607,64 +628,72 @@ function renderTimeline(phases) {
     const toStr   = phase.toSeconds   != null ? formatTime(phase.toSeconds)   : '—';
     const timeStr = `${fromStr} → ${toStr}`;
 
+    // Build dominant guna badge for this phase
     const gunas = phase.avgGunas || {};
     const dominantGunaKey = Object.entries(gunas).filter(([, v]) => v != null).sort((a, b) => b[1] - a[1])[0]?.[0];
     const gunaLabels = { sattva: '☀ Sattvic', rajas: '🔥 Rajasic', tamas: '🌑 Tamasic' };
     const gunaClass  = { sattva: 'tgb-sattva', rajas: 'tgb-rajas', tamas: 'tgb-tamas' };
     const gunaBadge  = dominantGunaKey
-      ? `<span class="triguna-badge ${gunaClass[dominantGunaKey]}">${gunaLabels[dominantGunaKey]}</span>`
+      ? `<span class="timeline-guna-badge ${gunaClass[dominantGunaKey]}">${gunaLabels[dominantGunaKey]}</span>`
       : '';
 
-    const bands  = phase.avgBands || {};
+    // Band summary for this phase
+    const bands = phase.avgBands || {};
     const topBand = Object.entries(bands).filter(([, v]) => v != null).sort((a, b) => b[1] - a[1])[0];
     const bandNote = topBand ? `Dominant band: ${topBand[0]} (${(topBand[1] * 100).toFixed(1)}%)` : '';
 
     const div = document.createElement('div');
     div.className = `timeline-phase phase-${phase.state}`;
     div.innerHTML = `
-      <div class="phase-header">
-        <span class="phase-time">${escHtml(timeStr)}</span>
-        <span class="phase-state">${escHtml(phase.state)}</span>
-        <span class="phase-depth">${escHtml(phase.depth || '')}</span>
-        ${bandNote ? `<span class="phase-band-note">${escHtml(bandNote)}</span>` : ''}
+      <div class="timeline-time">${escHtml(timeStr)}</div>
+      <div class="timeline-state">
+        <div class="timeline-state-name">${escHtml(phase.state)}</div>
+        <div class="timeline-state-depth">${escHtml(phase.depth || '')}</div>
+        ${bandNote ? `<div class="timeline-state-detail">${escHtml(bandNote)}</div>` : ''}
       </div>
-      <div class="phase-footer">
-        ${gunaBadge}
-        <span class="phase-epoch-count">${phase.epochCount} epoch${phase.epochCount !== 1 ? 's' : ''}</span>
-      </div>`;
+      <div class="timeline-gunas">${gunaBadge}</div>
+      <div class="timeline-epoch-count">${phase.epochCount} epoch${phase.epochCount !== 1 ? 's' : ''}</div>`;
     container.appendChild(div);
   });
 }
 
 // ── EEG Readings → UI ─────────────────────────────────────────────────────────
 function setStatus(type, text) {
-  const dot = $('status-dot');
-  const txt = $('status-text');
+  const dot  = $('status-dot');
+  const txt  = $('status-text');
   dot.className = 'status-dot' + (type ? ' ' + type : '');
   txt.textContent = text;
 }
 
+/**
+ * applyReading — apply a full inference result to every UI widget.
+ * Also stores epoch data to DB if a session is active.
+ */
 function applyReading(r) {
-  $('val-epoch').textContent = r.epoch ?? epoch;
+  // ── Epoch / quality / latency ──
+  $('val-epoch').textContent   = r.epoch ?? epoch;
   $('val-quality').textContent = r.data_quality || '—';
-  $('val-latency').textContent = r.latency_ms != null ? r.latency_ms.toFixed(1) : '—';
+  $('val-latency').textContent = r.latency_ms   != null ? r.latency_ms.toFixed(1) : '—';
 
-  const ch = r.chitta_bhumi || {};
+  // ── Chitta Bhumi ──
+  const ch    = r.chitta_bhumi || {};
   const state = ch.state || '—';
   $('chitta-state').textContent = state;
-  $('chitta-sub').textContent = ch.depth || ch.confidence || '—';
+  $('chitta-sub').textContent   = ch.depth || ch.confidence || '—';
 
-  const depth = ch.depth || CHITTA_DEPTHS[state] || 'Surface';
-  const depthPct = DEPTH_PCT[depth] ?? 12;
+  // Depth bar
+  const depth     = ch.depth || CHITTA_DEPTHS[state] || 'Surface';
+  const depthPct  = DEPTH_PCT[depth] ?? 12;
   const depthFill = $('depth-fill');
   const depthColor = state === 'Kshipta' ? 'var(--kshipta)' : state === 'Vikshipta' ? 'var(--vikshipta)'
     : state === 'Ekagra' ? 'var(--ekagra)' : 'var(--niruddha)';
-  depthFill.style.width = depthPct + '%';
+  depthFill.style.width      = depthPct + '%';
   depthFill.style.background = depthColor;
 
   $('val-confidence').textContent = ch.confidence || '—';
-  $('val-depth').textContent = depth;
+  $('val-depth').textContent      = depth;
 
+  // State probabilities
   const probs = ch.probabilities || {};
   ['Kshipta', 'Vikshipta', 'Ekagra', 'Niruddha'].forEach(s => {
     const raw = probs[s] ?? '0%';
@@ -672,17 +701,18 @@ function applyReading(r) {
     const key = s.toLowerCase();
     const el  = $('prob-' + key);
     const bar = $('bar-' + key);
-    if (el)  el.textContent = isNaN(pct) ? raw : pct.toFixed(1) + '%';
+    if (el)  el.textContent  = isNaN(pct) ? raw : pct.toFixed(1) + '%';
     if (bar) bar.style.width = (isNaN(pct) ? parseFloat(raw) : pct) + '%';
   });
 
-  const sw   = r.swara || {};
-  const sst  = (sw.state || '').toLowerCase();
+  // ── Swara ──
+  const sw  = r.swara || {};
+  const sst = (sw.state || '').toLowerCase();
   const isIda      = /ida/.test(sst);
   const isPingala  = /pingala/.test(sst);
   const isSushumna = !isIda && !isPingala;
 
-  $('swara-note').textContent = sw.note || (isIda ? SWARA_NOTES.ida : isPingala ? SWARA_NOTES.pingala : SWARA_NOTES.sushumna);
+  $('swara-note').textContent       = sw.note || (isIda ? SWARA_NOTES.ida : isPingala ? SWARA_NOTES.pingala : SWARA_NOTES.sushumna);
   $('swara-confidence').textContent = sw.confidence || '—';
 
   $('glyph-ida').className      = 'swara-glyph' + (isIda      ? ' active-ida'      : '');
@@ -699,24 +729,30 @@ function applyReading(r) {
   thumb.style.left       = thumbL;
   thumb.style.background = fillBg;
   if (pct > 0) {
-    fillEl.style.left = '50%'; fillEl.style.right = (100 - (50 + pct)) + '%'; fillEl.style.background = fillBg;
+    fillEl.style.left  = '50%';
+    fillEl.style.right = (100 - (50 + pct)) + '%';
+    fillEl.style.background = fillBg;
   } else if (pct < 0) {
-    fillEl.style.left = (50 + pct) + '%'; fillEl.style.right = '50%'; fillEl.style.background = fillBg;
+    fillEl.style.left  = (50 + pct) + '%';
+    fillEl.style.right = '50%';
+    fillEl.style.background = fillBg;
   } else {
     fillEl.style.left = fillEl.style.right = '50%';
   }
 
+  // ── Spectral Band Powers ──
   const spectrum = r.eeg_spectrum || (r.band_powers && r.band_powers.relative) || {};
   const bands = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
   bands.forEach(b => {
-    const raw  = spectrum[b] ?? null;
-    const pct  = raw != null ? (raw * 100).toFixed(1) : null;
+    const raw = spectrum[b] ?? null;
+    const pct = raw != null ? (raw * 100).toFixed(1) : null;
     const valEl = $('val-' + b);
     const barEl = $('bar-' + b);
     if (valEl) valEl.textContent = pct ? pct + '%' : '—';
     if (barEl) barEl.style.width = pct ? Math.min(pct, 100) + '%' : '0%';
   });
 
+  // ── Tattva Flags ──
   const flags   = r.tattva_flags || r.tattva || [];
   const flagDiv = $('tattva-flags');
   flagDiv.innerHTML = '';
@@ -726,31 +762,27 @@ function applyReading(r) {
     flags.forEach(f => {
       const span = document.createElement('span');
       let cls = 'tattva-other';
-      if (/tattva/i.test(f))     cls = 'tattva-activation';
+      if (/tattva/i.test(f))    cls = 'tattva-activation';
       else if (/pratyahara/i.test(f)) cls = 'pratyahara';
-      else if (/turiya/i.test(f))    cls = 'turiya';
-      else if (/gamma/i.test(f))     cls = 'gamma-spike';
-      span.className = 'tattva-flag ' + cls;
+      else if (/turiya/i.test(f))     cls = 'turiya';
+      else if (/gamma/i.test(f))      cls = 'gamma-spike';
+      span.className  = 'tattva-flag ' + cls;
       span.textContent = f;
       flagDiv.appendChild(span);
     });
   }
 
+  // ── Trigunas ──
   applyGunas(r.gunas);
 
-  if (activeSession) storeEpoch(r, spectrum, flags);
-
-  // BT wizard: if in waiting_for_signal, count epochs towards threshold
-  if (btWizardState === 'waiting_for_signal' || btWizardState === 'device_connected') {
-    btWizardEpochCount++;
-    updateWizardSignalQuality(r.data_quality || 'Fair');
-    if (btWizardEpochCount >= BT_SIGNAL_THRESHOLD) {
-      setBtWizardState('signal_detected');
-    }
+  // ── Store epoch to DB (if session active) ──
+  if (activeSession) {
+    storeEpoch(r, spectrum, flags);
   }
 
+  // ── Waveform pulse ──
   const ampSrc = spectrum.alpha || spectrum.theta || 0.2;
-  const amp    = 0.3 + ampSrc * 1.5;
+  const amp = 0.3 + ampSrc * 1.5;
   for (let i = 0; i < 8; i++) {
     waveBuf[waveTail % WAVE_LEN] = Math.sin(wavePhase + i * 0.8) * amp;
     waveTail++;
@@ -760,33 +792,48 @@ function applyReading(r) {
 
 // ── Trigunas UI ───────────────────────────────────────────────────────────────
 function applyGunas(gunas) {
-  if (!gunas) gunas = computeLocalGunas();
+  if (!gunas) {
+    // Compute locally if not provided by backend
+    gunas = computeLocalGunas();
+  }
+
   const { sattva = 0, rajas = 0, tamas = 0, label = '—', note = '' } = gunas;
+
   $('val-sattva').textContent = (sattva * 100).toFixed(1) + '%';
   $('val-rajas').textContent  = (rajas  * 100).toFixed(1) + '%';
   $('val-tamas').textContent  = (tamas  * 100).toFixed(1) + '%';
+
   $('bar-sattva').style.width = (sattva * 100) + '%';
   $('bar-rajas').style.width  = (rajas  * 100) + '%';
   $('bar-tamas').style.width  = (tamas  * 100) + '%';
+
   $('gunas-dominant').textContent = label || '—';
-  $('gunas-note').textContent = note || '';
+  $('gunas-note').textContent     = note  || '';
 }
 
+/**
+ * computeLocalGunas — simple heuristic for demo/local-FFT mode
+ * when the Python backend doesn't return gunas.
+ */
 function computeLocalGunas() {
+  // Read current band bar widths as a proxy for band power
   const get = id => parseFloat($('bar-' + id)?.style.width || '0') / 100;
   const alpha = get('alpha'), theta = get('theta'), beta = get('beta'),
         delta = get('delta'), gamma = get('gamma');
 
   let sat = alpha * 3.0 + theta * 1.5 - beta * 1.5;
-  let raj = beta  * 3.0 + gamma * 2.5 - alpha * 1.5;
+  let raj = beta * 3.0 + gamma * 2.5 - alpha * 1.5;
   let tam = delta * 3.0 - alpha * 1.5;
 
-  sat = Math.max(sat, 0.05); raj = Math.max(raj, 0.05); tam = Math.max(tam, 0.05);
+  sat = Math.max(sat, 0.05);
+  raj = Math.max(raj, 0.05);
+  tam = Math.max(tam, 0.05);
   const total = sat + raj + tam;
   sat /= total; raj /= total; tam /= total;
 
   const dominant = sat > raj && sat > tam ? 'sattva' : raj > tam ? 'rajas' : 'tamas';
   const maxVal   = Math.max(sat, raj, tam);
+
   let label = 'Balanced';
   if (maxVal > 0.45) label = dominant === 'sattva' ? 'Sattvic' : dominant === 'rajas' ? 'Rajasic' : 'Tamasic';
 
@@ -797,24 +844,27 @@ function computeLocalGunas() {
 async function storeEpoch(r, spectrum, flags) {
   if (!activeSession) return;
   sessionEpochCounter++;
+
   const elapsedSeconds = sessionStartTimestamp
     ? (Date.now() - sessionStartTimestamp.getTime()) / 1000
     : null;
 
-  const ch    = r.chitta_bhumi || {};
-  const sw    = r.swara || {};
-  const gunas = r.gunas || computeLocalGunas();
-  const swaraState  = sw.state || '';
+  const ch    = r.chitta_bhumi  || {};
+  const sw    = r.swara         || {};
+  const gunas = r.gunas         || computeLocalGunas();
+
+  // Determine simple swara key
+  const swaraState = sw.state || '';
   const swaraSimple = /ida/i.test(swaraState) ? 'Ida' : /pingala/i.test(swaraState) ? 'Pingala' : 'Sushumna';
 
   const epochBody = {
-    epochNum: sessionEpochCounter,
-    elapsedSeconds: elapsedSeconds ? +elapsedSeconds.toFixed(2) : null,
-    chittaBhumi: ch.state || null,
-    chittaConfidence: ch.confidence || null,
-    contemplativeDepth: ch.depth || null,
-    swara: swaraSimple,
-    swaraConfidence: sw.confidence || null,
+    epochNum:          sessionEpochCounter,
+    elapsedSeconds:    elapsedSeconds ? +elapsedSeconds.toFixed(2) : null,
+    chittaBhumi:       ch.state            || null,
+    chittaConfidence:  ch.confidence       || null,
+    contemplativeDepth: ch.depth           || null,
+    swara:             swaraSimple,
+    swaraConfidence:   sw.confidence       || null,
     bands: {
       delta: spectrum.delta ?? null,
       theta: spectrum.theta ?? null,
@@ -831,6 +881,7 @@ async function storeEpoch(r, spectrum, flags) {
     tattvaFlags: flags || [],
   };
 
+  // Fire-and-forget — don't block the UI
   api('POST', '/sessions/' + activeSession.id + '/epoch', epochBody)
     .catch(err => console.warn('[Epoch store] failed:', err.message));
 }
@@ -861,235 +912,189 @@ function fft(signal) {
     }
   }
   const half = size >> 1, mags = new Array(half);
-  for (let i = 0; i < half; i++) mags[i] = Math.sqrt(re[i]*re[i] + im[i]*im[i]);
+  for (let i = 0; i < half; i++) mags[i] = Math.sqrt(re[i]*re[i]+im[i]*im[i]) / size;
   return mags;
 }
 
 function bandPowers(mags, sr, sz) {
-  const binHz = sr / sz;
-  let d=0, t=0, a=0, b=0, g=0, total=0;
-  mags.forEach((v, i) => {
-    const hz = i * binHz;
-    if (hz >= 1  && hz <  4)  d += v;
-    if (hz >= 4  && hz <  8)  t += v;
-    if (hz >= 8  && hz < 13)  a += v;
-    if (hz >= 13 && hz < 30)  b += v;
-    if (hz >= 30 && hz < 50)  g += v;
-    if (hz >= 1  && hz < 50)  total += v;
-  });
-  if (!total) return { delta:0.2,theta:0.2,alpha:0.2,beta:0.2,gamma:0.2 };
-  return { delta:d/total, theta:t/total, alpha:a/total, beta:b/total, gamma:g/total };
+  const res = sr / sz;
+  const bin = hz => Math.round(hz / res);
+  const sum = (lo, hi) => {
+    let s = 0;
+    for (let b = bin(lo); b <= Math.min(bin(hi), mags.length-1); b++) s += mags[b]*mags[b];
+    return s;
+  };
+  const d=sum(0.5,4), t=sum(4,8), a=sum(8,13), be=sum(13,30), g=sum(30,50);
+  const tot = d+t+a+be+g || 1;
+  return { delta:d/tot, theta:t/tot, alpha:a/tot, beta:be/tot, gamma:g/tot };
+}
+
+function softmax(logits) {
+  const m = Math.max(...logits), ex = logits.map(l=>Math.exp(l-m)), s = ex.reduce((a,b)=>a+b,0);
+  return ex.map(e=>e/s);
 }
 
 function classifyLocal(bp) {
-  const DEMO_STATES = ['Kshipta','Vikshipta','Ekagra','Niruddha'];
-  const alpha = bp.alpha, theta = bp.theta, beta = bp.beta;
-  let state;
-  if      (alpha > 0.35)             state = 'Ekagra';
-  else if (theta > 0.30)             state = 'Vikshipta';
-  else if (alpha > 0.25 && beta < 0.20) state = 'Niruddha';
-  else                                state = 'Kshipta';
-  const depth = CHITTA_DEPTHS[state];
-  const asym  = bp.alpha - bp.theta;
-  const swaraSimple = asym > 0.02 ? 'Pingala (Solar · Right)' : asym < -0.02 ? 'Ida (Lunar · Left)' : 'Sushumna (Balanced)';
-  const gunas = computeLocalGunas ? computeLocalGunas() : { sattva:0.33, rajas:0.33, tamas:0.34, label:'Balanced' };
+  const states = ['Kshipta','Vikshipta','Ekagra','Niruddha'];
+  const logits = [
+    bp.beta*3.0 + bp.gamma*1.5 - bp.alpha*1.5,
+    bp.alpha*1.5 + bp.beta*1.5 - bp.theta*0.5,
+    bp.alpha*3.5 + bp.theta*1.0 - bp.beta*2.0,
+    bp.theta*3.0 + bp.delta*2.0 - bp.beta*2.5,
+  ];
+  const probs = softmax(logits);
+  const maxI  = probs.indexOf(Math.max(...probs));
+  const state = states[maxI];
+  const probMap = {};
+  states.forEach((s,i) => { probMap[s] = (probs[i]*100).toFixed(1)+'%'; });
+
+  const asym = (Math.random()-0.5) * 0.3;
+  const isIda = asym < -0.04, isPingala = asym > 0.04;
+  const swaraState = isIda ? 'Ida Nadi — right hemisphere dominant'
+    : isPingala ? 'Pingala Nadi — left hemisphere dominant'
+    : 'Sushumna — both nadis balanced';
+  const swaraNote = isIda ? SWARA_NOTES.ida : isPingala ? SWARA_NOTES.pingala : SWARA_NOTES.sushumna;
+
+  const tattva = [];
+  if (bp.alpha>0.35 && bp.theta<0.25) tattva.push('Pratyahara Window');
+  if (bp.theta>0.28 && bp.alpha>0.28) tattva.push('Potential Tattva Activation');
+  if (bp.theta>0.32 && bp.delta>0.12) tattva.push('Turiya Approach');
+  if (bp.gamma>0.12) tattva.push('Gamma Spike');
+
   epoch++;
+  const depth = CHITTA_DEPTHS[state];
   return {
-    epoch,
+    epoch, latency_ms: 20 + Math.random()*10,
     data_quality: '✓ local FFT',
-    timestamp: new Date().toISOString().slice(11,22),
-    chitta_bhumi: { state, depth, confidence: '—', probabilities: {} },
-    swara: { state: swaraSimple, confidence: '—' },
-    tattva_flags: [],
-    alpha_asymmetry: asym,
+    chitta_bhumi: { state, depth, confidence: probMap[state], probabilities: probMap },
+    swara:        { state: swaraState, confidence: Math.abs(asym)>0.12 ? 'High' : 'Moderate', note: swaraNote },
+    band_powers:  { relative: bp },
     eeg_spectrum: bp,
-    gunas,
+    alpha_asymmetry: asym,
+    tattva_flags: tattva,
+    contemplative_depth: depth,
+    // gunas not included — will be computed locally in applyReading
   };
 }
 
 // ── Demo mode ─────────────────────────────────────────────────────────────────
-const DEMO_SEQUENCE = [
-  { chitta_bhumi:{ state:'Kshipta',  depth:'Surface',  confidence:'71%', probabilities:{Kshipta:'71%',Vikshipta:'18%',Ekagra:'8%',Niruddha:'3%'} }, swara:{ state:'Pingala (Solar)', confidence:'68%' }, tattva_flags:[], alpha_asymmetry:0.12, eeg_spectrum:{ delta:0.28, theta:0.22, alpha:0.24, beta:0.19, gamma:0.07 }, gunas:{ sattva:0.28, rajas:0.51, tamas:0.21, label:'Rajasic' } },
-  { chitta_bhumi:{ state:'Vikshipta', depth:'Emerging', confidence:'65%', probabilities:{Kshipta:'22%',Vikshipta:'65%',Ekagra:'10%',Niruddha:'3%'} }, swara:{ state:'Ida (Lunar)',    confidence:'72%' }, tattva_flags:[], alpha_asymmetry:-0.08, eeg_spectrum:{ delta:0.22, theta:0.31, alpha:0.28, beta:0.14, gamma:0.05 }, gunas:{ sattva:0.42, rajas:0.32, tamas:0.26, label:'Sattvic' } },
-  { chitta_bhumi:{ state:'Ekagra',   depth:'Deep',     confidence:'80%', probabilities:{Kshipta:'5%',Vikshipta:'12%',Ekagra:'80%',Niruddha:'3%'} },  swara:{ state:'Sushumna',       confidence:'61%' }, tattva_flags:['Pratyahara Window detected'], alpha_asymmetry:0.01, eeg_spectrum:{ delta:0.18, theta:0.24, alpha:0.38, beta:0.14, gamma:0.06 }, gunas:{ sattva:0.58, rajas:0.25, tamas:0.17, label:'Sattvic' } },
-  { chitta_bhumi:{ state:'Niruddha', depth:'Profound', confidence:'91%', probabilities:{Kshipta:'2%',Vikshipta:'4%',Ekagra:'3%',Niruddha:'91%'} },  swara:{ state:'Sushumna',       confidence:'88%' }, tattva_flags:['Turiya State – Deep Theta Coherence','Pratyahara Window detected'], alpha_asymmetry:0.00, eeg_spectrum:{ delta:0.15, theta:0.38, alpha:0.30, beta:0.11, gamma:0.06 }, gunas:{ sattva:0.67, rajas:0.19, tamas:0.14, label:'Sattvic' } },
+const DEMO_STATES = ['Kshipta','Vikshipta','Ekagra','Niruddha'];
+const DEMO_SWARA  = [
+  'Ida Nadi — right hemisphere dominant',
+  'Pingala Nadi — left hemisphere dominant',
+  'Sushumna — both nadis balanced',
 ];
+const DEMO_BANDS = {
+  Kshipta:   { delta:0.08, theta:0.15, alpha:0.22, beta:0.40, gamma:0.15 },
+  Vikshipta: { delta:0.12, theta:0.22, alpha:0.28, beta:0.28, gamma:0.10 },
+  Ekagra:    { delta:0.10, theta:0.20, alpha:0.42, beta:0.20, gamma:0.08 },
+  Niruddha:  { delta:0.08, theta:0.35, alpha:0.38, beta:0.12, gamma:0.07 },
+};
+const SWARA_NOTES_MAP = {
+  'Ida Nadi — right hemisphere dominant':    SWARA_NOTES.ida,
+  'Pingala Nadi — left hemisphere dominant': SWARA_NOTES.pingala,
+  'Sushumna — both nadis balanced':          SWARA_NOTES.sushumna,
+};
 
 function startDemo() {
   stopAll();
   mode = 'demo';
-  $('btn-demo').textContent = '⏹ Stop';
-  setStatus('demo', 'demo running');
-  $('val-mode').textContent = 'Demo';
-  $('val-board').textContent = 'Simulated';
+  setStatus('connected', 'demo running');
+  $('btn-demo').textContent = '⏹ Stop Demo';
+  $('val-mode').textContent  = 'demo';
+  $('val-board').textContent = 'synthetic';
 
+  demoEpoch = 0;
   const tick = () => {
-    const base  = DEMO_SEQUENCE[demoStateIdx % DEMO_SEQUENCE.length];
-    const noise = () => (Math.random() - 0.5) * 0.04;
-    const sp    = base.eeg_spectrum;
-    const noisy = {
-      delta: Math.max(0, sp.delta + noise()),
-      theta: Math.max(0, sp.theta + noise()),
-      alpha: Math.max(0, sp.alpha + noise()),
-      beta:  Math.max(0, sp.beta  + noise()),
-      gamma: Math.max(0, sp.gamma + noise()),
-    };
     demoEpoch++;
-    applyReading({
-      ...base,
-      epoch: demoEpoch,
-      data_quality: '✓ demo',
-      timestamp: new Date().toISOString().slice(11,22) + ' UTC',
-      eeg_spectrum: noisy,
-      latency_ms: 8 + Math.random() * 4,
+    const state = DEMO_STATES[demoStateIdx];
+    const swaraStr = DEMO_SWARA[demoSwaraIdx];
+    const bp = DEMO_BANDS[state];
+
+    // Simulated probs
+    const probMap = {};
+    DEMO_STATES.forEach((s, i) => {
+      probMap[s] = (i === demoStateIdx ? 72 + Math.random()*10 : 5 + Math.random()*8).toFixed(1) + '%';
     });
-    if (demoEpoch % 3 === 0) demoStateIdx++;
+    const asym = demoSwaraIdx === 0 ? -0.2 : demoSwaraIdx === 1 ? 0.2 : 0.01;
+
+    epoch++;
+    applyReading({
+      epoch,
+      latency_ms: 18 + Math.random()*6,
+      data_quality: '✓ demo mode',
+      chitta_bhumi: {
+        state,
+        depth: CHITTA_DEPTHS[state],
+        confidence: (72 + Math.random()*10).toFixed(1) + '%',
+        probabilities: probMap,
+      },
+      swara: {
+        state: swaraStr,
+        confidence: Math.abs(asym) > 0.12 ? 'High' : 'Moderate',
+        note: SWARA_NOTES_MAP[swaraStr],
+      },
+      eeg_spectrum: bp,
+      alpha_asymmetry: asym,
+      tattva_flags: [],
+      contemplative_depth: CHITTA_DEPTHS[state],
+    });
+
+    // Advance state every few ticks
+    if (demoEpoch % 5 === 0) demoStateIdx = (demoStateIdx + 1) % DEMO_STATES.length;
+    if (demoEpoch % 7 === 0) demoSwaraIdx = (demoSwaraIdx + 1) % DEMO_SWARA.length;
   };
 
   tick();
   demoTimer = setInterval(tick, DEMO_INTERVAL);
 }
 
+function stopDemo() {
+  clearInterval(demoTimer); demoTimer = null;
+  mode = 'idle';
+  $('btn-demo').textContent = '▶ Demo';
+  setStatus('', 'disconnected');
+}
+
+// ── Demo button ───────────────────────────────────────────────────────────────
 $('btn-demo').addEventListener('click', () => {
-  if (mode === 'demo') { stopAll(); } else { startDemo(); }
+  if (mode === 'demo') stopDemo();
+  else startDemo();
 });
 
-// ── Bluetooth — with connection wizard ────────────────────────────────────────
+// ── Bluetooth ─────────────────────────────────────────────────────────────────
+$('btn-bt-scan').addEventListener('click', () => {
+  $('settings-overlay').classList.remove('open');
+  openBtWizard();
+});
+$('btn-bt-disconnect').addEventListener('click', disconnectBluetooth);
 $('btn-bluetooth').addEventListener('click', () => {
-  if (mode === 'bluetooth') {
-    disconnectBluetooth();
-  } else {
-    openBtWizard();
-  }
+  if (mode === 'bluetooth') disconnectBluetooth();
+  else openBtWizard();
 });
-
-function openBtWizard() {
-  btWizardEpochCount = 0;
-  setBtWizardState('pairing');
-  $('bt-wizard-overlay').style.display = 'flex';
-  connectBluetooth();
-}
-
-function closeBtWizard() {
-  $('bt-wizard-overlay').style.display = 'none';
-  clearTimeout(btWizardCountdownTimer);
-  clearInterval(btWizardSignalCheckTimer);
-  btWizardState = 'idle';
-}
-
-function setBtWizardState(newState) {
-  btWizardState = newState;
-
-  // Hide all phase panels
-  ['btwiz-pairing','btwiz-connected','btwiz-countdown'].forEach(id => {
-    const el = $(id);
-    if (el) el.style.display = 'none';
-  });
-
-  if (newState === 'pairing') {
-    $('btwiz-pairing').style.display = '';
-    setBtWizardStatusText('Searching…');
-  }
-
-  if (newState === 'device_connected' || newState === 'waiting_for_signal') {
-    $('btwiz-connected').style.display = '';
-    $('btwiz-signal-label').textContent = 'Waiting for Brain Signals…';
-    $('btwiz-signal-quality').textContent = '—';
-    $('btwiz-signal-quality').className = 'btwiz-quality';
-    $('btwiz-head-glow').style.borderColor = 'rgba(255,255,255,0.2)';
-  }
-
-  if (newState === 'signal_detected') {
-    $('btwiz-connected').style.display = '';
-    $('btwiz-signal-label').textContent = 'Signal Acquired — Starting analysis…';
-    $('btwiz-head-glow').style.borderColor = '#56A67A';
-    startBtCountdown();
-  }
-
-  if (newState === 'countdown') {
-    $('btwiz-countdown').style.display = '';
-  }
-
-  if (newState === 'analysing') {
-    closeBtWizard();
-  }
-}
-
-function setBtWizardStatusText(text) {
-  const el = $('btwiz-status-text');
-  if (el) el.textContent = text;
-}
-
-function updateWizardSignalQuality(quality) {
-  const el = $('btwiz-signal-quality');
-  if (!el) return;
-  const labels = {
-    'Poor': { text: 'Poor', cls: 'btwiz-quality quality-poor' },
-    'Fair': { text: 'Fair', cls: 'btwiz-quality quality-fair' },
-    'Good': { text: 'Good', cls: 'btwiz-quality quality-good' },
-    'Excellent': { text: 'Excellent', cls: 'btwiz-quality quality-excellent' },
-  };
-  const q = quality.includes('✓') ? 'Good' : (labels[quality] ? quality : 'Fair');
-  const def = labels[q] || labels['Fair'];
-  el.textContent = def.text;
-  el.className = def.cls;
-  $('btwiz-signal-label').textContent = 'Receiving Brain Signals…';
-}
-
-function startBtCountdown() {
-  setBtWizardState('countdown');
-  let count = 3;
-  const numEl = $('btwiz-countdown-num');
-  if (numEl) {
-    numEl.textContent = count;
-    numEl.classList.remove('countdown-animate');
-    void numEl.offsetWidth; // force reflow
-    numEl.classList.add('countdown-animate');
-  }
-
-  const tick = () => {
-    count--;
-    if (count <= 0) {
-      setBtWizardState('analysing');
-      return;
-    }
-    if (numEl) {
-      numEl.textContent = count;
-      numEl.classList.remove('countdown-animate');
-      void numEl.offsetWidth;
-      numEl.classList.add('countdown-animate');
-    }
-    btWizardCountdownTimer = setTimeout(tick, 1000);
-  };
-  btWizardCountdownTimer = setTimeout(tick, 1000);
-}
 
 async function connectBluetooth() {
   if (!navigator.bluetooth) {
-    setBtWizardStatusText('Web Bluetooth not supported. Use Chrome or Edge.');
+    alert('Web Bluetooth is not available. Please use Chrome or Edge.');
     return;
   }
-
   try {
-    setBtWizardStatusText('Searching…');
-
     const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [MUSE_SERVICE_UUID] }],
+      filters:          [{ services: [MUSE_SERVICE_UUID] }],
       optionalServices: [MUSE_SERVICE_UUID],
     });
-
-    setBtWizardStatusText('Connecting…');
-    const server = await device.gatt.connect();
-    setBtWizardStatusText('Authenticating…');
-    const service = await server.getPrimaryService(MUSE_SERVICE_UUID);
-    setBtWizardStatusText('Connected');
-
+    btDevice = device;
     device.addEventListener('gattserverdisconnected', onBtDisconnected);
 
-    const ctrl = await service.getCharacteristic(MUSE_CONTROL_UUID).catch(() => null);
-    if (ctrl) {
-      await ctrl.writeValue(new TextEncoder().encode('p21\n')).catch(() => {});
-      await ctrl.writeValue(new TextEncoder().encode('s\n')).catch(() => {});
+    const server  = await device.gatt.connect();
+    const service = await server.getPrimaryService(MUSE_SERVICE_UUID);
+
+    const controlChar = await service.getCharacteristic(MUSE_CONTROL_UUID).catch(() => null);
+    if (controlChar) {
+      const enc = new TextEncoder();
+      await controlChar.writeValue(enc.encode('p21\n'));
+      await new Promise(r => setTimeout(r, 300));
+      await controlChar.writeValue(enc.encode('d\n'));
     }
 
     for (let c = 0; c < MUSE_EEG_UUIDS.length; c++) {
@@ -1108,23 +1113,16 @@ async function connectBluetooth() {
     $('bt-device-row').style.display = '';
     bleChannels.forEach(ch => { ch.length = 0; });
     $('val-buffer').textContent = '0 / ' + COLLECT_N;
-
-    // Advance wizard to signal-waiting phase
-    setBtWizardState('waiting_for_signal');
-    btWizardEpochCount = 0;
-
   } catch (err) {
-    if (err.message?.includes('cancelled') || err.name === 'NotFoundError') {
-      closeBtWizard();
-    } else {
-      setBtWizardStatusText('Connection failed: ' + err.message);
+    if (!err.message?.includes('cancelled')) {
+      console.warn('BT connect failed:', err.message);
       setStatus('error', 'BT failed');
     }
   }
 }
 
 function onMuseEEG(ev, ch) {
-  const data = ev.target.value;
+  const data    = ev.target.value;
   const samples = [];
   for (let i = 2; i < data.byteLength - 1; i += 2) {
     samples.push(data.getInt16(i, false) * 0.48828125e-6);
@@ -1151,13 +1149,13 @@ async function processBluetoothEEG() {
   if (backendUrl) {
     try {
       const res = await fetch(backendUrl.replace(/\/$/, '') + '/analyze', {
-        method: 'POST',
+        method:  'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eeg_data: snapshot, sample_rate: SAMPLE_RATE }),
-        signal: AbortSignal.timeout(15000),
+        body:    JSON.stringify({ eeg_data: snapshot, sample_rate: SAMPLE_RATE }),
+        signal:  AbortSignal.timeout(15000),
       });
       if (!res.ok) throw new Error('HTTP ' + res.status);
-      const data = await res.json();
+      const data    = await res.json();
       const latency = (performance.now() - t0).toFixed(1);
       epoch++;
       applyReading({
@@ -1165,20 +1163,21 @@ async function processBluetoothEEG() {
         data_quality: '✓ BLE → Render',
         timestamp: new Date().toISOString().slice(11,22) + ' UTC',
         chitta_bhumi: {
-          state: data.chitta_bhumi?.state || '—',
-          depth: data.chitta_bhumi?.depth || data.depth || '—',
-          confidence: data.chitta_bhumi?.confidence || '—',
+          state:         data.chitta_bhumi?.state      || '—',
+          depth:         data.chitta_bhumi?.depth       || data.depth || '—',
+          confidence:    data.chitta_bhumi?.confidence  || '—',
           probabilities: data.chitta_bhumi?.probabilities || {},
         },
         swara: {
-          state: data.swara?.state || '—',
+          state:      data.swara?.state      || '—',
           confidence: data.swara?.confidence || '—',
-          note: data.swara?.note || '',
+          note:       data.swara?.note       || '',
         },
-        tattva_flags: data.tattva || data.tattva_flags || [],
+        tattva_flags:        data.tattva || data.tattva_flags || [],
         contemplative_depth: data.depth || '—',
-        alpha_asymmetry: 0,
-        eeg_spectrum: data.eeg_spectrum || null,
+        alpha_asymmetry:     0,
+        eeg_spectrum:        data.eeg_spectrum || null,
+        // NEW: backend now returns gunas
         gunas: data.gunas || null,
       });
       return;
@@ -1206,26 +1205,11 @@ function disconnectBluetooth() {
   setStatus('', 'disconnected');
   $('btn-bluetooth').classList.remove('bt-active');
   $('val-buffer').textContent = '0 / ' + COLLECT_N;
-
-  // If wizard is open, go back to pairing
-  if (btWizardState !== 'idle' && btWizardState !== 'analysing') {
-    clearTimeout(btWizardCountdownTimer);
-    setBtWizardState('pairing');
-    connectBluetooth(); // retry
-  }
 }
 
 function onBtDisconnected() {
   if (mode === 'bluetooth') disconnectBluetooth();
 }
-
-// ── BT Wizard close button ────────────────────────────────────────────────────
-document.addEventListener('click', e => {
-  if (e.target.id === 'btn-close-bt-wizard') {
-    if (mode === 'bluetooth') disconnectBluetooth();
-    closeBtWizard();
-  }
-});
 
 // ── Backend URL mode ──────────────────────────────────────────────────────────
 async function connectBackendUrl(url) {
@@ -1236,12 +1220,12 @@ async function connectBackendUrl(url) {
   $('val-mode').textContent  = 'BLE → Render';
 
   let attempts = 0;
-  const MAX = 40;
+  const MAX    = 40;
 
   const poll = async () => {
     attempts++;
     try {
-      const res = await fetch(url.replace(/\/$/, '') + '/status', { signal: AbortSignal.timeout(5000) });
+      const res  = await fetch(url.replace(/\/$/, '') + '/status', { signal: AbortSignal.timeout(5000) });
       if (res.ok) {
         const data = await res.json();
         if (data.model_ready) {
@@ -1268,8 +1252,8 @@ async function connectBackendUrl(url) {
 
 // ── Stop everything ───────────────────────────────────────────────────────────
 function stopAll() {
-  clearInterval(demoTimer); demoTimer = null;
-  clearInterval(pollTimer); pollTimer = null;
+  clearInterval(demoTimer);        demoTimer        = null;
+  clearInterval(pollTimer);        pollTimer        = null;
   clearInterval(backendPollTimer); backendPollTimer = null;
   if (sseSource) { sseSource.close(); sseSource = null; }
   if (mode === 'bluetooth') disconnectBluetooth();
@@ -1281,17 +1265,17 @@ function stopAll() {
 // ── Session management ────────────────────────────────────────────────────────
 $('btn-start-session').addEventListener('click', async () => {
   const name = prompt('Session name:', 'Session ' + new Date().toLocaleDateString());
-  if (name === null) return;
+  if (name === null) return; // cancelled
 
   try {
     const sess = await api('POST', '/sessions/start', { name: name.trim() || 'New Session' });
-    activeSession = sess;
+    activeSession        = sess;
     sessionStartTimestamp = new Date();
-    sessionEpochCounter = 0;
+    sessionEpochCounter  = 0;
 
     $('session-name-display').textContent = sess.name;
-    $('btn-start-session').style.display = 'none';
-    $('btn-end-session').style.display   = '';
+    $('btn-start-session').style.display  = 'none';
+    $('btn-end-session').style.display    = '';
 
     sessionTimerInterval = setInterval(() => {
       if (!activeSession) return;
@@ -1314,10 +1298,10 @@ $('btn-end-session').addEventListener('click', async () => {
     await api('POST', '/sessions/' + activeSession.id + '/end');
     activeSession = null;
     sessionStartTimestamp = null;
-    $('btn-start-session').style.display   = '';
-    $('btn-end-session').style.display     = 'none';
-    $('session-name-display').textContent  = '—';
-    $('session-timer').textContent         = '0:00';
+    $('btn-start-session').style.display  = '';
+    $('btn-end-session').style.display    = 'none';
+    $('session-name-display').textContent = '—';
+    $('session-timer').textContent        = '0:00';
     loadSessionHistory();
   } catch (err) {
     alert('Error ending session: ' + err.message);
@@ -1344,7 +1328,7 @@ let historyVisible = false;
 
 $('btn-toggle-history').addEventListener('click', () => {
   historyVisible = !historyVisible;
-  $('history-list').style.display  = historyVisible ? '' : 'none';
+  $('history-list').style.display    = historyVisible ? '' : 'none';
   $('btn-toggle-history').textContent = historyVisible ? 'Hide' : 'Show';
   if (historyVisible) loadSessionHistory();
 });
@@ -1352,8 +1336,8 @@ $('btn-toggle-history').addEventListener('click', () => {
 async function loadSessionHistory() {
   try {
     const sessions = await api('GET', '/sessions');
-    const list  = $('history-list');
-    const empty = $('history-empty');
+    const list     = $('history-list');
+    const empty    = $('history-empty');
 
     list.innerHTML = '';
     if (!sessions.length) {
@@ -1365,13 +1349,11 @@ async function loadSessionHistory() {
       const div = document.createElement('div');
       div.className = 'history-item';
       div.innerHTML = `
-        <div class="history-item-info">
-          <span class="history-name">${escHtml(s.name)}</span>
-          <span class="history-date">${formatDate(s.startTime)}</span>
-          <span class="history-dur">${s.duration ? formatDuration(s.duration) : (s.endTime ? '—' : 'active')}</span>
+        <div class="history-info">
+          <div class="history-name">${escHtml(s.name)}</div>
+          <div class="history-meta">${formatDate(s.startTime)}</div>
         </div>
-        <button class="btn-sm" data-action="view-analytics" data-sid="${s.id}" data-sname="${escHtml(s.name)}">View</button>
-      `;
+        <div class="history-dur">${s.duration ? formatDuration(s.duration) : (s.endTime ? '—' : 'active')}</div>`;
       list.appendChild(div);
     });
   } catch (err) {
@@ -1379,219 +1361,8 @@ async function loadSessionHistory() {
   }
 }
 
-$('history-list').addEventListener('click', e => {
-  const btn = e.target.closest('[data-action="view-analytics"]');
-  if (!btn) return;
-  const sid   = parseInt(btn.dataset.sid, 10);
-  const sname = btn.dataset.sname;
-  openSessionAnalytics(sid, sname);
-});
-
+// ── History toggle btn ────────────────────────────────────────────────────────
 $('btn-toggle-history').textContent = 'Show';
-
-// ── Session Replay ─────────────────────────────────────────────────────────────
-function setupReplay(epochs, session) {
-  replayEpochs  = epochs.filter(e => e.elapsedSeconds != null).sort((a,b) => a.elapsedSeconds - b.elapsedSeconds);
-  replayCurrentIdx = 0;
-  replayPlaying = false;
-  replaySpeed   = 1;
-
-  if (!replayEpochs.length) {
-    const rp = $('replay-player');
-    if (rp) rp.style.display = 'none';
-    return;
-  }
-
-  const lastEpoch = replayEpochs[replayEpochs.length - 1];
-  replaySessionDuration = lastEpoch.elapsedSeconds || session.duration || 0;
-
-  const slider = $('replay-slider');
-  if (slider) {
-    slider.min   = 0;
-    slider.max   = replayEpochs.length - 1;
-    slider.value = 0;
-  }
-
-  updateReplayUI();
-
-  const rp = $('replay-player');
-  if (rp) rp.style.display = '';
-
-  // Keyboard shortcuts
-  document.addEventListener('keydown', onReplayKeydown);
-}
-
-function stopReplay() {
-  if (replayTimer) { clearInterval(replayTimer); replayTimer = null; }
-  replayPlaying = false;
-  replayEpochs  = [];
-  const playBtn = $('replay-play');
-  if (playBtn) playBtn.textContent = '▶';
-  const rp = $('replay-player');
-  if (rp) rp.style.display = 'none';
-  document.removeEventListener('keydown', onReplayKeydown);
-}
-
-function onReplayKeydown(e) {
-  // Only act if analytics overlay is open
-  if ($('analytics-overlay').style.display === 'none') return;
-  if (e.code === 'Space')       { e.preventDefault(); toggleReplayPlay(); }
-  if (e.code === 'ArrowLeft')   { e.preventDefault(); replayJump(-10); }
-  if (e.code === 'ArrowRight')  { e.preventDefault(); replayJump(+10); }
-}
-
-function toggleReplayPlay() {
-  replayPlaying ? pauseReplay() : playReplay();
-}
-
-function playReplay() {
-  if (!replayEpochs.length) return;
-  if (replayCurrentIdx >= replayEpochs.length - 1) replayCurrentIdx = 0;
-
-  replayPlaying = true;
-  const playBtn = $('replay-play');
-  if (playBtn) playBtn.textContent = '⏸';
-
-  // Each epoch: use elapsed diff between adjacent epochs, scaled by speed
-  const advanceEpoch = () => {
-    if (!replayPlaying || replayCurrentIdx >= replayEpochs.length - 1) {
-      pauseReplay();
-      return;
-    }
-    replayCurrentIdx++;
-    applyReplayEpoch(replayCurrentIdx);
-    updateReplayUI();
-
-    // Time until next epoch
-    const curr = replayEpochs[replayCurrentIdx];
-    const next = replayEpochs[replayCurrentIdx + 1];
-    const delay = next ? Math.max(50, (next.elapsedSeconds - curr.elapsedSeconds) * 1000 / replaySpeed) : 1000;
-    replayTimer = setTimeout(advanceEpoch, delay);
-  };
-
-  applyReplayEpoch(replayCurrentIdx);
-  updateReplayUI();
-  const curr = replayEpochs[replayCurrentIdx];
-  const next = replayEpochs[replayCurrentIdx + 1];
-  const delay = next ? Math.max(50, (next.elapsedSeconds - curr.elapsedSeconds) * 1000 / replaySpeed) : 1000;
-  replayTimer = setTimeout(advanceEpoch, delay);
-}
-
-function pauseReplay() {
-  replayPlaying = false;
-  if (replayTimer) { clearTimeout(replayTimer); replayTimer = null; }
-  const playBtn = $('replay-play');
-  if (playBtn) playBtn.textContent = '▶';
-}
-
-function replayJump(seconds) {
-  if (!replayEpochs.length) return;
-  const targetSec = (replayEpochs[replayCurrentIdx]?.elapsedSeconds || 0) + seconds;
-  // Find nearest epoch
-  let bestIdx = replayCurrentIdx;
-  let bestDiff = Infinity;
-  replayEpochs.forEach((ep, i) => {
-    const diff = Math.abs(ep.elapsedSeconds - targetSec);
-    if (diff < bestDiff) { bestDiff = diff; bestIdx = i; }
-  });
-  replayCurrentIdx = Math.max(0, Math.min(replayEpochs.length - 1, bestIdx));
-  applyReplayEpoch(replayCurrentIdx);
-  updateReplayUI();
-  // If playing, restart timer from new position
-  if (replayPlaying) { pauseReplay(); playReplay(); }
-}
-
-function applyReplayEpoch(idx) {
-  const ep = replayEpochs[idx];
-  if (!ep) return;
-
-  const bands = ep.bands || {};
-  const gunas = ep.gunas || {};
-
-  // Build a reading object identical to what applyReading expects
-  const reading = {
-    epoch: ep.epochNum,
-    data_quality: '⏮ replay',
-    latency_ms: null,
-    chitta_bhumi: {
-      state: ep.chittaBhumi || '—',
-      depth: ep.contemplativeDepth || '—',
-      confidence: ep.chittaConfidence || '—',
-      probabilities: {},
-    },
-    swara: {
-      state: ep.swara || '—',
-      confidence: ep.swaraConfidence || '—',
-    },
-    tattva_flags: ep.tattvaFlags || [],
-    alpha_asymmetry: 0,
-    eeg_spectrum: bands,
-    gunas: {
-      sattva: gunas.sattva,
-      rajas:  gunas.rajas,
-      tamas:  gunas.tamas,
-      label:  gunas.label || '—',
-    },
-  };
-
-  // Apply to all live UI widgets — same path as live streaming
-  const savedActiveSession = activeSession;
-  activeSession = null; // don't re-store epochs during replay
-  applyReading(reading);
-  activeSession = savedActiveSession;
-}
-
-function updateReplayUI() {
-  const ep   = replayEpochs[replayCurrentIdx];
-  const curr = ep?.elapsedSeconds ?? 0;
-  const total = replaySessionDuration;
-
-  const currentTimeEl = $('replay-current-time');
-  const totalTimeEl   = $('replay-total-time');
-  const slider        = $('replay-slider');
-
-  if (currentTimeEl) currentTimeEl.textContent = formatTime(curr);
-  if (totalTimeEl)   totalTimeEl.textContent   = formatTime(total);
-  if (slider)        slider.value = replayCurrentIdx;
-}
-
-// Replay event listeners
-document.addEventListener('DOMContentLoaded', () => {
-  const replay = id => $(id);
-
-  const bindReplay = () => {
-    const playBtn    = $('replay-play');
-    const restartBtn = $('replay-restart');
-    const backBtn    = $('replay-back');
-    const fwdBtn     = $('replay-fwd');
-    const speedSel   = $('replay-speed');
-    const slider     = $('replay-slider');
-
-    if (playBtn)    playBtn.addEventListener('click', toggleReplayPlay);
-    if (restartBtn) restartBtn.addEventListener('click', () => {
-      pauseReplay();
-      replayCurrentIdx = 0;
-      applyReplayEpoch(0);
-      updateReplayUI();
-    });
-    if (backBtn) backBtn.addEventListener('click', () => replayJump(-10));
-    if (fwdBtn)  fwdBtn.addEventListener('click',  () => replayJump(+10));
-    if (speedSel) speedSel.addEventListener('change', () => {
-      replaySpeed = parseFloat(speedSel.value) || 1;
-      if (replayPlaying) { pauseReplay(); playReplay(); }
-    });
-    if (slider) {
-      slider.addEventListener('input', () => {
-        const idx = parseInt(slider.value, 10);
-        replayCurrentIdx = idx;
-        applyReplayEpoch(idx);
-        updateReplayUI();
-      });
-      slider.addEventListener('mousedown', () => { if (replayPlaying) pauseReplay(); });
-    }
-  };
-  bindReplay();
-});
 
 // ── Canvas / Waveform ─────────────────────────────────────────────────────────
 function resizeCanvas() {
@@ -1609,7 +1380,7 @@ function drawWave() {
   const canvas = $('eeg-canvas');
   if (!canvas) return;
   const ctx = canvas.getContext('2d');
-  const w   = canvas.clientWidth, h = 110;
+  const w = canvas.clientWidth, h = 110;
   ctx.clearRect(0, 0, w, h);
 
   const bg = ctx.createLinearGradient(0, 0, 0, h);
@@ -1619,10 +1390,11 @@ function drawWave() {
   ctx.fillRect(0, 0, w, h);
 
   ctx.strokeStyle = '#E4E2DC';
-  ctx.lineWidth = 1;
+  ctx.lineWidth   = 1;
   ctx.setLineDash([4, 6]);
   ctx.beginPath();
-  ctx.moveTo(0, h / 2); ctx.lineTo(w, h / 2);
+  ctx.moveTo(0, h / 2);
+  ctx.lineTo(w, h / 2);
   ctx.stroke();
   ctx.setLineDash([]);
 
@@ -1630,14 +1402,14 @@ function drawWave() {
   if (len < 2) { requestAnimationFrame(drawWave); return; }
 
   const grad = ctx.createLinearGradient(0, 0, w, 0);
-  grad.addColorStop(0,    'rgba(217,119,87,0)');
+  grad.addColorStop(0, 'rgba(217,119,87,0)');
   grad.addColorStop(0.18, 'rgba(217,119,87,0.8)');
   grad.addColorStop(0.85, 'rgba(217,119,87,0.8)');
-  grad.addColorStop(1,    'rgba(217,119,87,0)');
+  grad.addColorStop(1, 'rgba(217,119,87,0)');
   ctx.strokeStyle = grad;
-  ctx.lineWidth = 2;
-  ctx.lineJoin  = 'round';
-  ctx.lineCap   = 'round';
+  ctx.lineWidth   = 2;
+  ctx.lineJoin    = 'round';
+  ctx.lineCap     = 'round';
 
   ctx.beginPath();
   for (let i = 0; i < len; i++) {
@@ -1651,6 +1423,205 @@ function drawWave() {
   requestAnimationFrame(drawWave);
 }
 
+// ── BT Wizard ─────────────────────────────────────────────────────────────────
+function showBtWizardPhase(phase) {
+  btWizardPhase = phase;
+  ['idle', 'pairing', 'waiting', 'countdown', 'done', 'error'].forEach(p => {
+    const el = $('btwiz-phase-' + p);
+    if (el) el.style.display = (p === phase) ? '' : 'none';
+  });
+  const stepMap = { idle: 1, pairing: 1, waiting: 2, countdown: 3, done: 3, error: 1 };
+  const active  = stepMap[phase] || 1;
+  [1, 2, 3].forEach(n => {
+    const el = $('btwiz-step-' + n);
+    if (el) el.dataset.active = String(n === active);
+  });
+}
+
+function openBtWizard() {
+  showBtWizardPhase('idle');
+  $('bt-wizard-overlay').style.display = 'flex';
+}
+
+function closeBtWizard() {
+  $('bt-wizard-overlay').style.display = 'none';
+  clearTimeout(btWizardCountdownTimer);
+  clearInterval(btWizardQualityTimer);
+}
+
+$('btn-close-bt-wizard').addEventListener('click', closeBtWizard);
+$('btn-btwiz-done').addEventListener('click', closeBtWizard);
+$('btn-btwiz-retry').addEventListener('click', () => showBtWizardPhase('idle'));
+
+$('btn-btwiz-start').addEventListener('click', async () => {
+  showBtWizardPhase('pairing');
+  try {
+    await connectBluetooth();
+    const deviceName = btDevice?.name || 'Muse';
+    $('btwiz-device-name').textContent = deviceName;
+    showBtWizardPhase('waiting');
+    startBtWizardQualityCheck();
+  } catch (err) {
+    $('btwiz-error-msg').textContent = err.message || 'Bluetooth pairing failed. Try again.';
+    showBtWizardPhase('error');
+  }
+});
+
+function startBtWizardQualityCheck() {
+  let ticks = 0;
+  clearInterval(btWizardQualityTimer);
+  btWizardQualityTimer = setInterval(() => {
+    ticks++;
+    // Read the quality value already set in the UI by applyReading / setStatus
+    const qualText = $('val-quality')?.textContent || '';
+    const isGood   = qualText.includes('✓') || qualText === 'Good' || qualText === 'OK';
+    const bar      = $('btwiz-quality-bar');
+    const lbl      = $('btwiz-quality-label');
+    if (bar) bar.style.width = Math.min(ticks * 12, 90) + '%';
+    if (lbl) lbl.textContent = isGood ? 'Signal good!' : 'Adjust headband for better contact…';
+    if (isGood || ticks >= 8) {
+      clearInterval(btWizardQualityTimer);
+      if (bar) bar.style.width = '100%';
+      startBtWizardCountdown();
+    }
+  }, 1000);
+}
+
+function startBtWizardCountdown() {
+  let count = 3;
+  if ($('btwiz-countdown-number')) $('btwiz-countdown-number').textContent = count;
+  showBtWizardPhase('countdown');
+  btWizardCountdownTimer = setInterval(() => {
+    count--;
+    if ($('btwiz-countdown-number')) $('btwiz-countdown-number').textContent = count;
+    if (count <= 0) {
+      clearInterval(btWizardCountdownTimer);
+      showBtWizardPhase('done');
+    }
+  }, 1000);
+}
+
+// ── Replay Player ─────────────────────────────────────────────────────────────
+async function setupReplayPlayer() {
+  stopReplay();
+  replayEpochs = [];
+  replayIndex  = 0;
+  const noData       = $('replay-no-data');
+  const stateDisplay = $('replay-state-display');
+  const slider       = $('replay-slider');
+
+  if (!currentAnalyticsSessionId) { showReplayNoData(); return; }
+
+  try {
+    const data   = await api('GET', '/sessions/' + currentAnalyticsSessionId + '/epochs');
+    replayEpochs = Array.isArray(data) ? data : (data.epochs || []);
+  } catch {
+    showReplayNoData();
+    return;
+  }
+
+  if (!replayEpochs.length) { showReplayNoData(); return; }
+
+  if (noData)        noData.style.display       = 'none';
+  if (stateDisplay)  stateDisplay.style.display = '';
+  if (slider) {
+    slider.max   = replayEpochs.length - 1;
+    slider.value = 0;
+  }
+  updateReplayDisplay(0);
+}
+
+function showReplayNoData() {
+  const noData       = $('replay-no-data');
+  const stateDisplay = $('replay-state-display');
+  if (noData)        noData.style.display       = '';
+  if (stateDisplay)  stateDisplay.style.display = 'none';
+  const epochLbl = $('replay-epoch-label');
+  const timeLbl  = $('replay-time-label');
+  if (epochLbl) epochLbl.textContent = '—';
+  if (timeLbl)  timeLbl.textContent  = '—';
+}
+
+function updateReplayDisplay(idx) {
+  if (!replayEpochs.length) return;
+  idx = Math.max(0, Math.min(idx, replayEpochs.length - 1));
+  replayIndex = idx;
+  const ep     = replayEpochs[idx];
+  const slider = $('replay-slider');
+  if (slider) slider.value = idx;
+
+  const epochLbl = $('replay-epoch-label');
+  const timeLbl  = $('replay-time-label');
+  if (epochLbl) epochLbl.textContent = `Epoch ${idx + 1} / ${replayEpochs.length}`;
+  if (timeLbl)  timeLbl.textContent  =
+    ep.elapsedSeconds != null ? formatTime(ep.elapsedSeconds) : '—';
+
+  const state = ep.chittaBhumi || ep.chitta_state || ep.state || '—';
+  const swara = ep.swara       || ep.swaraState   || '—';
+  const guna  = ep.gunas?.label || ep.dominantGuna || ep.dominant_guna || '—';
+  const alpha = ep.bands?.alpha != null
+    ? (ep.bands.alpha * 100).toFixed(1) + '%'
+    : ep.alpha != null ? (ep.alpha * 100).toFixed(1) + '%' : '—';
+
+  const sv = $('replay-state-val'); if (sv) sv.textContent = state;
+  const sw = $('replay-swara-val'); if (sw) sw.textContent = swara;
+  const gv = $('replay-guna-val');  if (gv) gv.textContent = guna;
+  const av = $('replay-alpha-val'); if (av) av.textContent = alpha;
+}
+
+function stopReplay() {
+  clearInterval(replayTimer);
+  replayTimer   = null;
+  replayPlaying = false;
+  const btn = $('replay-play-pause');
+  if (btn) btn.textContent = '▶ Play';
+}
+
+function renderAnalyticsNotes(content) {
+  const el = $('a-notes-content');
+  if (!el) return;
+  if (content && content.trim()) {
+    el.textContent = content;
+  } else {
+    el.innerHTML = '<em class="analytics-notes-empty">No notes recorded for this session.</em>';
+  }
+}
+
+// Replay control wiring (elements are always in DOM, just hidden)
+$('replay-play-pause').addEventListener('click', () => {
+  if (!replayEpochs.length) return;
+  if (replayPlaying) {
+    stopReplay();
+  } else {
+    replayPlaying = true;
+    $('replay-play-pause').textContent = '⏸ Pause';
+    replayTimer = setInterval(() => {
+      if (replayIndex >= replayEpochs.length - 1) { stopReplay(); return; }
+      updateReplayDisplay(replayIndex + 1);
+    }, 600);
+  }
+});
+
+$('replay-prev').addEventListener('click', () => {
+  stopReplay();
+  if (replayIndex > 0) updateReplayDisplay(replayIndex - 1);
+});
+
+$('replay-next').addEventListener('click', () => {
+  stopReplay();
+  if (replayIndex < replayEpochs.length - 1) updateReplayDisplay(replayIndex + 1);
+});
+
+$('replay-slider').addEventListener('input', () => {
+  stopReplay();
+  updateReplayDisplay(parseInt($('replay-slider').value, 10));
+});
+
+// Stop replay when analytics modal closes
+$('btn-close-analytics').addEventListener('click', stopReplay);
+
 // ── Init ──────────────────────────────────────────────────────────────────────
 window.addEventListener('resize', resizeCanvas);
+
+// Start by checking auth — show login or main app accordingly
 checkAuth();
