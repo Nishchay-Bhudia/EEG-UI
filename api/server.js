@@ -10,7 +10,7 @@ const { Pool } = require('pg');
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
   ssl: { rejectUnauthorized: false }, // required for Supabase
-  max: 5, // keep small for serverless
+  max: 5,                             // keep small for serverless
 });
 
 // ── Session store ─────────────────────────────────────────────────────────────
@@ -105,19 +105,16 @@ const mapEpoch = r => ({
     delta: r.delta_power ? parseFloat(r.delta_power) : null,
     theta: r.theta_power ? parseFloat(r.theta_power) : null,
     alpha: r.alpha_power ? parseFloat(r.alpha_power) : null,
-    beta: r.beta_power ? parseFloat(r.beta_power) : null,
+    beta:  r.beta_power  ? parseFloat(r.beta_power)  : null,
     gamma: r.gamma_power ? parseFloat(r.gamma_power) : null,
   },
   gunas: {
     sattva: r.sattva ? parseFloat(r.sattva) : null,
-    rajas: r.rajas ? parseFloat(r.rajas) : null,
-    tamas: r.tamas ? parseFloat(r.tamas) : null,
-    label: r.guna_label,
+    rajas:  r.rajas  ? parseFloat(r.rajas)  : null,
+    tamas:  r.tamas  ? parseFloat(r.tamas)  : null,
+    label:  r.guna_label,
   },
   tattvaFlags: r.tattva_flags || [],
-  // ── Biometrics (null when headset has no PPG sensor) ─────────────────────
-  heartRate: r.heart_rate ? parseFloat(r.heart_rate) : null,
-  spo2: r.spo2 ? parseFloat(r.spo2) : null,
 });
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -137,9 +134,9 @@ router.post('/auth/login', async (req, res) => {
     if (!user || !(await bcrypt.compare(password, user.password_hash)))
       return res.status(401).json({ error: 'Invalid credentials' });
 
-    req.session.userId = user.id;
+    req.session.userId   = user.id;
     req.session.username = user.username;
-    req.session.role = user.role;
+    req.session.role     = user.role;
     res.json(mapUser(user));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -224,17 +221,17 @@ router.get('/sessions', requireAuth, async (req, res) => {
     if (req.session.role === 'admin') {
       ({ rows } = await pool.query(
         `SELECT s.*, u.username
-         FROM eeg_sessions s
-         LEFT JOIN users u ON s.user_id = u.id
-         ORDER BY s.start_time DESC`
+           FROM eeg_sessions s
+           LEFT JOIN users u ON s.user_id = u.id
+          ORDER BY s.start_time DESC`
       ));
     } else {
       ({ rows } = await pool.query(
         `SELECT s.*, u.username
-         FROM eeg_sessions s
-         LEFT JOIN users u ON s.user_id = u.id
-         WHERE s.user_id = $1
-         ORDER BY s.start_time DESC`,
+           FROM eeg_sessions s
+           LEFT JOIN users u ON s.user_id = u.id
+          WHERE s.user_id = $1
+          ORDER BY s.start_time DESC`,
         [req.session.userId]
       ));
     }
@@ -321,6 +318,7 @@ router.put('/sessions/:id/notes', requireAuth, async (req, res) => {
 /**
  * POST /api/sessions/:id/epoch
  * Store a single inference epoch during a live session.
+ * Called from the frontend after each /analyze response from the Python backend.
  *
  * Body: {
  *   epochNum, elapsedSeconds,
@@ -328,9 +326,7 @@ router.put('/sessions/:id/notes', requireAuth, async (req, res) => {
  *   swara, swaraConfidence,
  *   bands: { delta, theta, alpha, beta, gamma },
  *   gunas: { sattva, rajas, tamas, label },
- *   tattvaFlags: [],
- *   heartRate: number | null,   ← new: BPM from PPG, null if unavailable
- *   spo2: number | null,        ← new: SpO2 %, null if unavailable
+ *   tattvaFlags: []
  * }
  */
 router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
@@ -354,38 +350,32 @@ router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
       bands = {},
       gunas = {},
       tattvaFlags = [],
-      heartRate = null,
-      spo2 = null,
     } = req.body;
 
     const { rows } = await pool.query(
       `INSERT INTO session_epochs (
-         session_id, epoch_num, elapsed_seconds,
-         chitta_bhumi, chitta_confidence, contemplative_depth,
-         swara, swara_confidence,
-         delta_power, theta_power, alpha_power, beta_power, gamma_power,
-         sattva, rajas, tamas, guna_label,
-         tattva_flags,
-         heart_rate, spo2
-       ) VALUES (
-         $1, $2, $3,
-         $4, $5, $6,
-         $7, $8,
-         $9, $10, $11, $12, $13,
-         $14, $15, $16, $17,
-         $18,
-         $19, $20
-       ) RETURNING id`,
+          session_id, epoch_num, elapsed_seconds,
+          chitta_bhumi, chitta_confidence, contemplative_depth,
+          swara, swara_confidence,
+          delta_power, theta_power, alpha_power, beta_power, gamma_power,
+          sattva, rajas, tamas, guna_label,
+          tattva_flags
+        ) VALUES (
+          $1, $2, $3,
+          $4, $5, $6,
+          $7, $8,
+          $9, $10, $11, $12, $13,
+          $14, $15, $16, $17,
+          $18
+        ) RETURNING id`,
       [
         sessionId, epochNum || null, elapsedSeconds || null,
         chittaBhumi || null, chittaConfidence || null, contemplativeDepth || null,
         swara || null, swaraConfidence || null,
         bands.delta ?? null, bands.theta ?? null, bands.alpha ?? null,
-        bands.beta ?? null, bands.gamma ?? null,
+        bands.beta  ?? null, bands.gamma ?? null,
         gunas.sattva ?? null, gunas.rajas ?? null, gunas.tamas ?? null, gunas.label || null,
         JSON.stringify(tattvaFlags),
-        heartRate ?? null,
-        spo2 ?? null,
       ]
     );
     res.status(201).json({ ok: true, epochId: rows[0].id });
@@ -394,201 +384,246 @@ router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
   }
 });
 
-// ── Session Analytics ─────────────────────────────────────────────────────────
+// ── Session Epochs (list) ────────────────────────────────────────────────────────
+  /**
+   * GET /api/sessions/:id/epochs
+   * Returns all stored epochs for a session in order.
+   * Accessible by the session owner or any admin.
+   */
+  router.get('/sessions/:id/epochs', requireAuth, async (req, res) => {
+    try {
+      const sessionId = parseInt(req.params.id, 10);
+      const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]);
+      if (!sess) return res.status(404).json({ error: 'Session not found' });
+      if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
+        return res.status(403).json({ error: 'Forbidden' });
+      const { rows } = await pool.query(
+        'SELECT * FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC, recorded_at ASC',
+        [sessionId]
+      );
+      res.json(rows.map(mapEpoch));
+    } catch (e) {
+      res.status(500).json({ error: e.message });
+    }
+  });
+
+  // ── Session Analytics ─────────────────────────────────────────────────────────
 /**
  * GET /api/sessions/:id/analytics
  * Returns the full analytical summary for a session.
+ * Accessible by the session owner or any admin.
+ *
+ * Response:
+ * {
+ *   session: { ...session metadata },
+ *   epochs: [ ...all stored epochs ],
+ *   summary: {
+ *     totalEpochs,
+ *     durationSeconds,
+ *     avgBands: { delta, theta, alpha, beta, gamma },
+ *     avgGunas: { sattva, rajas, tamas },
+ *     dominantGuna,
+ *     stateBreakdown: { Kshipta:%, Vikshipta:%, Ekagra:%, Niruddha:% },
+ *     swaraBreakdown: { Ida:%, Pingala:%, Sushumna:% },
+ *     phases: [ { state, depth, from, to, epochCount, avgBands, avgGunas } ]
+ *   }
+ * }
  */
 router.get('/sessions/:id/analytics', requireAuth, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id, 10);
 
+    // Fetch session
     const { rows: [sess] } = await pool.query(
       `SELECT s.*, u.username
-       FROM eeg_sessions s
-       LEFT JOIN users u ON s.user_id = u.id
-       WHERE s.id = $1`,
+         FROM eeg_sessions s
+         LEFT JOIN users u ON s.user_id = u.id
+        WHERE s.id = $1`,
       [sessionId]
     );
     if (!sess) return res.status(404).json({ error: 'Session not found' });
     if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
       return res.status(403).json({ error: 'Forbidden' });
 
-    const { rows: epochs } = await pool.query(
-      `SELECT * FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC`,
+    // Fetch all epochs ordered by epoch_num
+    const { rows: epochRows } = await pool.query(
+      `SELECT * FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC, recorded_at ASC`,
       [sessionId]
     );
 
-    // ── Summary calculations ──────────────────────────────────────────────────
-    const totalEpochs = epochs.length;
+    const epochs = epochRows.map(mapEpoch);
 
-    // Chitta Bhumi state breakdown
-    const stateBreakdown = {};
-    const swaraBreakdown = {};
-    let gunaSum = { sattva: 0, rajas: 0, tamas: 0, n: 0 };
-    let bandSum = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0, n: 0 };
-    let hrSum = 0, hrCount = 0;
-    let spo2Sum = 0, spo2Count = 0;
-
-    for (const e of epochs) {
-      // State
-      if (e.chitta_bhumi) {
-        stateBreakdown[e.chitta_bhumi] = (stateBreakdown[e.chitta_bhumi] || 0) + 1;
-      }
-      // Swara
-      if (e.swara) {
-        swaraBreakdown[e.swara] = (swaraBreakdown[e.swara] || 0) + 1;
-      }
-      // Gunas
-      if (e.sattva != null) {
-        gunaSum.sattva += parseFloat(e.sattva);
-        gunaSum.rajas += parseFloat(e.rajas || 0);
-        gunaSum.tamas += parseFloat(e.tamas || 0);
-        gunaSum.n++;
-      }
-      // Bands
-      if (e.alpha_power != null) {
-        bandSum.delta += parseFloat(e.delta_power || 0);
-        bandSum.theta += parseFloat(e.theta_power || 0);
-        bandSum.alpha += parseFloat(e.alpha_power || 0);
-        bandSum.beta += parseFloat(e.beta_power || 0);
-        bandSum.gamma += parseFloat(e.gamma_power || 0);
-        bandSum.n++;
-      }
-      // Biometrics
-      if (e.heart_rate != null) {
-        hrSum += parseFloat(e.heart_rate);
-        hrCount++;
-      }
-      if (e.spo2 != null) {
-        spo2Sum += parseFloat(e.spo2);
-        spo2Count++;
-      }
-    }
-
-    // Convert state/swara breakdown to percentages
-    const toPercent = (obj, total) => {
-      const out = {};
-      for (const [k, v] of Object.entries(obj)) {
-        out[k] = total > 0 ? parseFloat((v / total * 100).toFixed(1)) : 0;
-      }
-      return out;
-    };
-
-    const avgGunas = gunaSum.n > 0
-      ? {
-          sattva: parseFloat((gunaSum.sattva / gunaSum.n).toFixed(4)),
-          rajas: parseFloat((gunaSum.rajas / gunaSum.n).toFixed(4)),
-          tamas: parseFloat((gunaSum.tamas / gunaSum.n).toFixed(4)),
-        }
-      : null;
-
-    const avgBands = bandSum.n > 0
-      ? {
-          delta: parseFloat((bandSum.delta / bandSum.n).toFixed(4)),
-          theta: parseFloat((bandSum.theta / bandSum.n).toFixed(4)),
-          alpha: parseFloat((bandSum.alpha / bandSum.n).toFixed(4)),
-          beta: parseFloat((bandSum.beta / bandSum.n).toFixed(4)),
-          gamma: parseFloat((bandSum.gamma / bandSum.n).toFixed(4)),
-        }
-      : null;
-
-    // Dominant guna
-    let dominantGuna = null;
-    if (avgGunas) {
-      const entries = Object.entries(avgGunas);
-      dominantGuna = entries.sort((a, b) => b[1] - a[1])[0][0];
-    }
-
-    // Average biometrics — null if no PPG data was collected this session
-    const avgHeartRate = hrCount > 0 ? parseFloat((hrSum / hrCount).toFixed(1)) : null;
-    const avgSpo2 = spo2Count > 0 ? parseFloat((spo2Sum / spo2Count).toFixed(1)) : null;
-
-    // Timeline: group consecutive epochs with the same Chitta Bhumi
-    const phases = [];
-    let currentPhase = null;
-    for (const e of epochs) {
-      const state = e.chitta_bhumi || 'Unknown';
-      if (!currentPhase || currentPhase.state !== state) {
-        if (currentPhase) phases.push(currentPhase);
-        currentPhase = {
-          state,
-          depth: e.contemplative_depth || null,
-          epochCount: 0,
-          fromSeconds: e.elapsed_seconds ? parseFloat(e.elapsed_seconds) : null,
-          toSeconds: null,
-          avgGunas: { sattva: 0, rajas: 0, tamas: 0, n: 0 },
-          avgBands: { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0, n: 0 },
-        };
-      }
-      currentPhase.epochCount++;
-      currentPhase.toSeconds = e.elapsed_seconds ? parseFloat(e.elapsed_seconds) : null;
-      if (e.sattva != null) {
-        currentPhase.avgGunas.sattva += parseFloat(e.sattva);
-        currentPhase.avgGunas.rajas += parseFloat(e.rajas || 0);
-        currentPhase.avgGunas.tamas += parseFloat(e.tamas || 0);
-        currentPhase.avgGunas.n++;
-      }
-      if (e.alpha_power != null) {
-        currentPhase.avgBands.delta += parseFloat(e.delta_power || 0);
-        currentPhase.avgBands.theta += parseFloat(e.theta_power || 0);
-        currentPhase.avgBands.alpha += parseFloat(e.alpha_power || 0);
-        currentPhase.avgBands.beta += parseFloat(e.beta_power || 0);
-        currentPhase.avgBands.gamma += parseFloat(e.gamma_power || 0);
-        currentPhase.avgBands.n++;
-      }
-    }
-    if (currentPhase) phases.push(currentPhase);
-
-    // Normalise phase averages
-    for (const p of phases) {
-      if (p.avgGunas.n > 0) {
-        const n = p.avgGunas.n;
-        p.avgGunas = {
-          sattva: parseFloat((p.avgGunas.sattva / n).toFixed(4)),
-          rajas: parseFloat((p.avgGunas.rajas / n).toFixed(4)),
-          tamas: parseFloat((p.avgGunas.tamas / n).toFixed(4)),
-        };
-      } else {
-        p.avgGunas = null;
-      }
-      if (p.avgBands.n > 0) {
-        const n = p.avgBands.n;
-        p.avgBands = {
-          delta: parseFloat((p.avgBands.delta / n).toFixed(4)),
-          theta: parseFloat((p.avgBands.theta / n).toFixed(4)),
-          alpha: parseFloat((p.avgBands.alpha / n).toFixed(4)),
-          beta: parseFloat((p.avgBands.beta / n).toFixed(4)),
-          gamma: parseFloat((p.avgBands.gamma / n).toFixed(4)),
-        };
-      } else {
-        p.avgBands = null;
-      }
-    }
+    // Build summary
+    const summary = buildAnalyticsSummary(epochs, sess);
 
     res.json({
       session: mapSession(sess),
-      epochs: epochs.map(mapEpoch),
-      summary: {
-        totalEpochs,
-        durationSeconds: sess.duration_seconds || null,
-        stateBreakdown: toPercent(stateBreakdown, totalEpochs),
-        swaraBreakdown: toPercent(swaraBreakdown, totalEpochs),
-        avgGunas,
-        avgBands,
-        dominantGuna,
-        phases,
-        // ── Biometrics summary ──────────────────────────────────────────────
-        avgHeartRate,   // null when headset has no PPG
-        avgSpo2,        // null when headset has no PPG
-      },
+      epochs,
+      summary,
     });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-// ── Mount router ──────────────────────────────────────────────────────────────
+/**
+ * buildAnalyticsSummary — compute stats from stored epochs.
+ * Groups consecutive same-state epochs into "phases" for the timeline.
+ */
+function buildAnalyticsSummary(epochs, sess) {
+  if (!epochs.length) {
+    return {
+      totalEpochs: 0,
+      durationSeconds: sess.duration_seconds || null,
+      avgBands: null,
+      avgGunas: null,
+      dominantGuna: null,
+      stateBreakdown: {},
+      swaraBreakdown: {},
+      phases: [],
+    };
+  }
+
+  // Average bands
+  const bandKeys = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
+  const avgBands = {};
+  for (const k of bandKeys) {
+    const vals = epochs.map(e => e.bands[k]).filter(v => v != null);
+    avgBands[k] = vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(4) : null;
+  }
+
+  // Average gunas
+  const gunaKeys = ['sattva', 'rajas', 'tamas'];
+  const avgGunas = {};
+  for (const k of gunaKeys) {
+    const vals = epochs.map(e => e.gunas[k]).filter(v => v != null);
+    avgGunas[k] = vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(4) : null;
+  }
+
+  // Dominant guna
+  const dominantGuna = avgGunas.sattva != null
+    ? Object.entries(avgGunas).sort((a, b) => b[1] - a[1])[0][0]
+    : null;
+
+  // State breakdown (% of epochs)
+  const stateCounts = {};
+  for (const ep of epochs) {
+    if (ep.chittaBhumi) stateCounts[ep.chittaBhumi] = (stateCounts[ep.chittaBhumi] || 0) + 1;
+  }
+  const stateBreakdown = {};
+  for (const [state, count] of Object.entries(stateCounts)) {
+    stateBreakdown[state] = +((count / epochs.length) * 100).toFixed(1);
+  }
+
+  // Swara breakdown
+  const swaraCounts = {};
+  for (const ep of epochs) {
+    if (ep.swara) {
+      let key = 'Sushumna';
+      if (/ida/i.test(ep.swara))     key = 'Ida';
+      if (/pingala/i.test(ep.swara)) key = 'Pingala';
+      swaraCounts[key] = (swaraCounts[key] || 0) + 1;
+    }
+  }
+  const swaraBreakdown = {};
+  for (const [swara, count] of Object.entries(swaraCounts)) {
+    swaraBreakdown[swara] = +((count / epochs.length) * 100).toFixed(1);
+  }
+
+  // Build phases — consecutive runs of the same Chitta Bhumi state
+  const phases = [];
+  let currentPhase = null;
+
+  for (const ep of epochs) {
+    const state = ep.chittaBhumi || 'Unknown';
+    if (!currentPhase || currentPhase.state !== state) {
+      if (currentPhase) phases.push(finalizePhase(currentPhase));
+      currentPhase = {
+        state,
+        depth: ep.contemplativeDepth,
+        startEpoch: ep.epochNum,
+        endEpoch: ep.epochNum,
+        fromSeconds: ep.elapsedSeconds,
+        toSeconds: ep.elapsedSeconds,
+        epochCount: 1,
+        bandSums: Object.fromEntries(bandKeys.map(k => [k, ep.bands[k] ?? 0])),
+        gunaSums: Object.fromEntries(gunaKeys.map(k => [k, ep.gunas[k] ?? 0])),
+        validBands: Object.fromEntries(bandKeys.map(k => [k, ep.bands[k] != null ? 1 : 0])),
+        validGunas: Object.fromEntries(gunaKeys.map(k => [k, ep.gunas[k] != null ? 1 : 0])),
+      };
+    } else {
+      currentPhase.endEpoch  = ep.epochNum;
+      currentPhase.toSeconds = ep.elapsedSeconds;
+      currentPhase.epochCount++;
+      for (const k of bandKeys) {
+        if (ep.bands[k] != null) { currentPhase.bandSums[k] += ep.bands[k]; currentPhase.validBands[k]++; }
+      }
+      for (const k of gunaKeys) {
+        if (ep.gunas[k] != null) { currentPhase.gunaSums[k] += ep.gunas[k]; currentPhase.validGunas[k]++; }
+      }
+    }
+  }
+  if (currentPhase) phases.push(finalizePhase(currentPhase));
+
+  return {
+    totalEpochs: epochs.length,
+    durationSeconds: sess.duration_seconds || null,
+    avgBands,
+    avgGunas,
+    dominantGuna,
+    stateBreakdown,
+    swaraBreakdown,
+    phases,
+  };
+}
+
+function finalizePhase(p) {
+  const bandKeys = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
+  const gunaKeys = ['sattva', 'rajas', 'tamas'];
+  const avgBands = {};
+  const avgGunas = {};
+  for (const k of bandKeys) {
+    avgBands[k] = p.validBands[k] ? +(p.bandSums[k] / p.validBands[k]).toFixed(4) : null;
+  }
+  for (const k of gunaKeys) {
+    avgGunas[k] = p.validGunas[k] ? +(p.gunaSums[k] / p.validGunas[k]).toFixed(4) : null;
+  }
+  return {
+    state:       p.state,
+    depth:       p.depth,
+    startEpoch:  p.startEpoch,
+    endEpoch:    p.endEpoch,
+    fromSeconds: p.fromSeconds,
+    toSeconds:   p.toSeconds,
+    epochCount:  p.epochCount,
+    avgBands,
+    avgGunas,
+  };
+}
+
+// ── Admin: sessions grouped by user ──────────────────────────────────────────
+router.get('/admin/sessions/by-user', requireAdmin, async (_req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT s.id, s.user_id, u.username, s.name,
+              s.start_time, s.end_time, s.duration_seconds
+         FROM eeg_sessions s
+         LEFT JOIN users u ON s.user_id = u.id
+        ORDER BY u.username, s.start_time DESC`
+    );
+    const grouped = {};
+    for (const row of rows) {
+      const key = row.username || 'unknown';
+      if (!grouped[key]) grouped[key] = [];
+      grouped[key].push(mapSession(row));
+    }
+    res.json(grouped);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Mount router & export ─────────────────────────────────────────────────────
 app.use('/api', router);
 
 module.exports = app;
