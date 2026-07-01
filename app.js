@@ -528,6 +528,12 @@ function renderSessionAnalytics(data, noteContent) {
   const stateEntries = Object.entries(summary.stateBreakdown || {}).sort((a, b) => b[1] - a[1]);
   $('a-dominant-state').textContent = stateEntries[0]?.[0] ?? '—';
 
+  // ── Vitals summary stats ──
+  const spo2El = $('a-avg-spo2');
+  const hrEl   = $('a-avg-hr');
+  if (spo2El) spo2El.textContent = summary.avgBloodOxygen != null ? summary.avgBloodOxygen.toFixed(1) : '—';
+  if (hrEl)   hrEl.textContent   = summary.avgHeartRate   != null ? summary.avgHeartRate.toFixed(1)   : '—';
+
   // ── Gunas bars ──
   const avgGunas = summary.avgGunas || {};
   setAnalyticsGuna('sattva', avgGunas.sattva);
@@ -1525,6 +1531,11 @@ function updateReplayDisplay(idx) {
   const sw = $('replay-swara-val'); if (sw) sw.textContent = swara;
   const gv = $('replay-guna-val');  if (gv) gv.textContent = guna;
   const av = $('replay-alpha-val'); if (av) av.textContent = alpha;
+
+  const spo2v = $('replay-spo2-val');
+  const hrv   = $('replay-hr-val');
+  if (spo2v) spo2v.textContent = ep.bloodOxygen != null ? Number(ep.bloodOxygen).toFixed(1) + '%' : '—';
+  if (hrv)   hrv.textContent   = ep.heartRate   != null ? Math.round(ep.heartRate) + ' BPM'   : '—';
 }
 
 function stopReplay() {
