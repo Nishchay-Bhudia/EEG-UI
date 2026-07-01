@@ -447,10 +447,13 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); min-
   text-transform: uppercase;
   letter-spacing: 0.04em;
 }
-.role-admin { background: rgba(217,119,87,0.15); color: var(--accent); }
-.role-user  { background: var(--bg-card-2); color: var(--text-muted); }
+.role-admin    { background: rgba(217,119,87,0.15); color: var(--accent); }
+.role-user     { background: var(--bg-card-2); color: var(--text-muted); }
+.role-co_admin { background: rgba(100,160,220,0.15); color: #64a0dc; }
 
-.table-actions { display: flex; gap: 6px; align-items: center; }
+.table-actions { display: flex; gap: 6px; align-items: center; flex-wrap: wrap; }
+
+.field-input-xs { padding: 4px 7px; font-size: 11px; height: 28px; }
 
 /* Epoch count badge */
 .epoch-badge {
