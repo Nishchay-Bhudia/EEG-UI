@@ -1,16 +1,16 @@
 'use strict';
 
-const express      = require('express');
-const session      = require('express-session');
-const connectPg    = require('connect-pg-simple');
-const bcrypt       = require('bcryptjs');
-const { Pool }     = require('pg');
+const express = require('express');
+const session = require('express-session');
+const connectPg = require('connect-pg-simple');
+const bcrypt = require('bcryptjs');
+const { Pool } = require('pg');
 
 // ── Database pool ─────────────────────────────────────────────────────────────
 const pool = new Pool({
   connectionString: process.env.DATABASE_URL,
-  ssl: { rejectUnauthorized: false },   // required for Supabase
-  max: 5,                               // keep small for serverless
+  ssl: { rejectUnauthorized: false }, // required for Supabase
+  max: 5,                             // keep small for serverless
 });
 
 // ── Session store ─────────────────────────────────────────────────────────────
@@ -19,7 +19,7 @@ const PgSession = connectPg(session);
 // ── Express app ───────────────────────────────────────────────────────────────
 const app = express();
 
-app.set('trust proxy', 1);  // trust Vercel's proxy for secure cookies
+app.set('trust proxy', 1); // trust Vercel's proxy for secure cookies
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
@@ -29,72 +29,96 @@ app.use(
     store: new PgSession({
       pool,
       tableName: 'user_sessions',
-      createTableIfMissing: false,  // table already created via schema.sql
+      createTableIfMissing: false,
     }),
-    secret: process.env.SESSION_SECRET || 'change-me-in-production',
+    secret: process.env.SESSION_SECRET || 'eeg-dev-secret-change-me',
     resave: false,
     saveUninitialized: false,
     cookie: {
-      maxAge: 7 * 24 * 60 * 60 * 1000,  // 7 days
-      httpOnly: true,
       secure: process.env.NODE_ENV === 'production',
-      sameSite: process.env.NODE_ENV === 'production' ? 'lax' : 'lax',
+      httpOnly: true,
+      maxAge: 7 * 24 * 60 * 60 * 1000, // 7 days
+      sameSite: process.env.NODE_ENV === 'production' ? 'none' : 'lax',
     },
   })
 );
 
-// ── Seed admin on cold start ──────────────────────────────────────────────────
-(async () => {
+// ── Auto-seed admin user ──────────────────────────────────────────────────────
+async function seedAdmin() {
   try {
-    const { rows } = await pool.query(
-      "SELECT id FROM users WHERE username = 'admin' LIMIT 1"
-    );
-    if (rows.length === 0) {
+    const { rows } = await pool.query("SELECT id FROM users WHERE username = 'admin' LIMIT 1");
+    if (!rows.length) {
       const hash = await bcrypt.hash('ShreeHari!', 12);
       await pool.query(
-        "INSERT INTO users (username, password_hash, role) VALUES ($1, $2, 'admin')",
-        ['admin', hash]
+        "INSERT INTO users (username, password_hash, role) VALUES ('admin', $1, 'admin')",
+        [hash]
       );
+      console.log('[Seed] Admin user created.');
     }
   } catch (e) {
-    console.error('Admin seed error:', e.message);
+    console.error('[Seed] Error:', e.message);
   }
-})();
+}
+seedAdmin();
 
-// ── Auth middleware ───────────────────────────────────────────────────────────
+// ── Middleware ────────────────────────────────────────────────────────────────
 function requireAuth(req, res, next) {
-  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
+  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
   next();
 }
+
 function requireAdmin(req, res, next) {
-  if (!req.session.userId) return res.status(401).json({ error: 'Not authenticated' });
-  if (req.session.role !== 'admin') return res.status(403).json({ error: 'Forbidden' });
+  if (!req.session?.userId) return res.status(401).json({ error: 'Not authenticated' });
+  if (req.session.role !== 'admin') return res.status(403).json({ error: 'Admin only' });
   next();
 }
 
-// ── Row mappers (DB snake_case → frontend camelCase) ─────────────────────────
-function mapUser(r) {
-  return { id: r.id, username: r.username, role: r.role, createdAt: r.created_at };
-}
+// ── Helpers ───────────────────────────────────────────────────────────────────
+const mapUser = r => ({
+  id: r.id,
+  username: r.username,
+  role: r.role,
+  createdAt: r.created_at,
+});
 
-function mapSession(r) {
-  return {
-    id:        r.id,
-    userId:    r.user_id,
-    username:  r.username ?? undefined,
-    name:      r.name,
-    startTime: r.start_time,
-    endTime:   r.end_time ?? null,
-    duration:  r.duration_seconds ?? null,
-    createdAt: r.created_at,
-  };
-}
+const mapSession = r => ({
+  id: r.id,
+  userId: r.user_id,
+  username: r.username || null,
+  name: r.name,
+  startTime: r.start_time,
+  endTime: r.end_time || null,
+  duration: r.duration_seconds || null,
+});
+
+const mapEpoch = r => ({
+  id: r.id,
+  epochNum: r.epoch_num,
+  recordedAt: r.recorded_at,
+  elapsedSeconds: r.elapsed_seconds ? parseFloat(r.elapsed_seconds) : null,
+  chittaBhumi: r.chitta_bhumi,
+  chittaConfidence: r.chitta_confidence,
+  contemplativeDepth: r.contemplative_depth,
+  swara: r.swara,
+  swaraConfidence: r.swara_confidence,
+  bands: {
+    delta: r.delta_power ? parseFloat(r.delta_power) : null,
+    theta: r.theta_power ? parseFloat(r.theta_power) : null,
+    alpha: r.alpha_power ? parseFloat(r.alpha_power) : null,
+    beta:  r.beta_power  ? parseFloat(r.beta_power)  : null,
+    gamma: r.gamma_power ? parseFloat(r.gamma_power) : null,
+  },
+  gunas: {
+    sattva: r.sattva ? parseFloat(r.sattva) : null,
+    rajas:  r.rajas  ? parseFloat(r.rajas)  : null,
+    tamas:  r.tamas  ? parseFloat(r.tamas)  : null,
+    label:  r.guna_label,
+  },
+  tattvaFlags: r.tattva_flags || [],
+});
 
 // ── Router ────────────────────────────────────────────────────────────────────
 const router = express.Router();
-
-// Health
-router.get('/healthz', (_req, res) => res.json({ ok: true }));
 
 // ── Auth ──────────────────────────────────────────────────────────────────────
 router.post('/auth/login', async (req, res) => {
@@ -103,41 +127,44 @@ router.post('/auth/login', async (req, res) => {
     if (!username || !password)
       return res.status(400).json({ error: 'Username and password required' });
 
-    const { rows } = await pool.query('SELECT * FROM users WHERE username = $1', [username]);
+    const { rows } = await pool.query(
+      'SELECT * FROM users WHERE username = $1 LIMIT 1', [username]
+    );
     const user = rows[0];
-    if (!user) return res.status(401).json({ error: 'Invalid credentials' });
-
-    const valid = await bcrypt.compare(password, user.password_hash);
-    if (!valid) return res.status(401).json({ error: 'Invalid credentials' });
+    if (!user || !(await bcrypt.compare(password, user.password_hash)))
+      return res.status(401).json({ error: 'Invalid credentials' });
 
     req.session.userId   = user.id;
     req.session.username = user.username;
     req.session.role     = user.role;
+    res.json(mapUser(user));
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
 
-    res.json({ id: user.id, username: user.username, role: user.role });
+router.get('/auth/me', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query('SELECT * FROM users WHERE id = $1', [req.session.userId]);
+    if (!rows[0]) return res.status(401).json({ error: 'User not found' });
+    res.json(mapUser(rows[0]));
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
 router.post('/auth/logout', (req, res) => {
-  req.session.destroy(() => res.json({ ok: true }));
-});
-
-router.get('/auth/me', requireAuth, (req, res) => {
-  res.json({
-    id:       req.session.userId,
-    username: req.session.username,
-    role:     req.session.role,
+  req.session.destroy(err => {
+    if (err) return res.status(500).json({ error: 'Logout failed' });
+    res.clearCookie('connect.sid');
+    res.json({ ok: true });
   });
 });
 
-// ── User management (admin only) ──────────────────────────────────────────────
+// ── Users (admin) ─────────────────────────────────────────────────────────────
 router.get('/users', requireAdmin, async (_req, res) => {
   try {
-    const { rows } = await pool.query(
-      'SELECT id, username, role, created_at FROM users ORDER BY created_at'
-    );
+    const { rows } = await pool.query('SELECT * FROM users ORDER BY created_at ASC');
     res.json(rows.map(mapUser));
   } catch (e) {
     res.status(500).json({ error: e.message });
@@ -193,19 +220,18 @@ router.get('/sessions', requireAuth, async (req, res) => {
     let rows;
     if (req.session.role === 'admin') {
       ({ rows } = await pool.query(
-        `SELECT s.id, s.user_id, u.username, s.name,
-                s.start_time, s.end_time, s.duration_seconds, s.created_at
-         FROM eeg_sessions s
-         LEFT JOIN users u ON s.user_id = u.id
-         ORDER BY s.start_time DESC`
+        `SELECT s.*, u.username
+           FROM eeg_sessions s
+           LEFT JOIN users u ON s.user_id = u.id
+          ORDER BY s.start_time DESC`
       ));
     } else {
       ({ rows } = await pool.query(
-        `SELECT s.id, s.user_id, NULL::text AS username, s.name,
-                s.start_time, s.end_time, s.duration_seconds, s.created_at
-         FROM eeg_sessions s
-         WHERE s.user_id = $1
-         ORDER BY s.start_time DESC`,
+        `SELECT s.*, u.username
+           FROM eeg_sessions s
+           LEFT JOIN users u ON s.user_id = u.id
+          WHERE s.user_id = $1
+          ORDER BY s.start_time DESC`,
         [req.session.userId]
       ));
     }
@@ -215,43 +241,33 @@ router.get('/sessions', requireAuth, async (req, res) => {
   }
 });
 
-router.post('/sessions', requireAuth, async (req, res) => {
+router.post('/sessions/start', requireAuth, async (req, res) => {
   try {
-    const { name } = req.body;
-    const sessionName = (name && name.trim()) || `Session ${new Date().toLocaleString()}`;
-
+    const { name = 'New Session' } = req.body;
     const { rows } = await pool.query(
       'INSERT INTO eeg_sessions (user_id, name) VALUES ($1, $2) RETURNING *',
-      [req.session.userId, sessionName]
+      [req.session.userId, name]
     );
     const sess = rows[0];
-
-    // Create an empty notes row for this session
-    await pool.query(
-      'INSERT INTO session_notes (session_id, content) VALUES ($1, $2) ON CONFLICT (session_id) DO NOTHING',
-      [sess.id, '']
-    );
-
-    res.status(201).json(mapSession(sess));
+    res.status(201).json({ id: sess.id, name: sess.name, startTime: sess.start_time });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
 });
 
-router.put('/sessions/:id/end', requireAuth, async (req, res) => {
+router.post('/sessions/:id/end', requireAuth, async (req, res) => {
   try {
-    const id = parseInt(req.params.id, 10);
-    const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [id]);
+    const sessionId = parseInt(req.params.id, 10);
+    const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]);
     if (!sess) return res.status(404).json({ error: 'Session not found' });
     if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
       return res.status(403).json({ error: 'Forbidden' });
 
     const now = new Date();
-    const duration = Math.round((now.getTime() - new Date(sess.start_time).getTime()) / 1000);
-
+    const duration = Math.round((now - new Date(sess.start_time)) / 1000);
     const { rows } = await pool.query(
       'UPDATE eeg_sessions SET end_time = $1, duration_seconds = $2 WHERE id = $3 RETURNING *',
-      [now, duration, id]
+      [now.toISOString(), duration, sessionId]
     );
     res.json(mapSession(rows[0]));
   } catch (e) {
@@ -259,28 +275,6 @@ router.put('/sessions/:id/end', requireAuth, async (req, res) => {
   }
 });
 
-router.put('/sessions/:id/name', requireAuth, async (req, res) => {
-  try {
-    const id = parseInt(req.params.id, 10);
-    const { name } = req.body;
-    if (!name || !name.trim()) return res.status(400).json({ error: 'Name required' });
-
-    const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [id]);
-    if (!sess) return res.status(404).json({ error: 'Session not found' });
-    if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
-      return res.status(403).json({ error: 'Forbidden' });
-
-    const { rows } = await pool.query(
-      'UPDATE eeg_sessions SET name = $1 WHERE id = $2 RETURNING *',
-      [name.trim(), id]
-    );
-    res.json(mapSession(rows[0]));
-  } catch (e) {
-    res.status(500).json({ error: e.message });
-  }
-});
-
-// ── Session Notes ─────────────────────────────────────────────────────────────
 router.get('/sessions/:id/notes', requireAuth, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id, 10);
@@ -289,10 +283,8 @@ router.get('/sessions/:id/notes', requireAuth, async (req, res) => {
     if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
       return res.status(403).json({ error: 'Forbidden' });
 
-    const { rows: [note] } = await pool.query(
-      'SELECT * FROM session_notes WHERE session_id = $1', [sessionId]
-    );
-    res.json({ sessionId, content: note ? note.content : '' });
+    const { rows } = await pool.query('SELECT * FROM session_notes WHERE session_id = $1', [sessionId]);
+    res.json({ sessionId, content: rows[0]?.content || '' });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
@@ -322,15 +314,279 @@ router.put('/sessions/:id/notes', requireAuth, async (req, res) => {
   }
 });
 
+// ── Session Epochs (live EEG data storage) ────────────────────────────────────
+/**
+ * POST /api/sessions/:id/epoch
+ * Store a single inference epoch during a live session.
+ * Called from the frontend after each /analyze response from the Python backend.
+ *
+ * Body: {
+ *   epochNum, elapsedSeconds,
+ *   chittaBhumi, chittaConfidence, contemplativeDepth,
+ *   swara, swaraConfidence,
+ *   bands: { delta, theta, alpha, beta, gamma },
+ *   gunas: { sattva, rajas, tamas, label },
+ *   tattvaFlags: []
+ * }
+ */
+router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.id, 10);
+
+    // Verify session ownership
+    const { rows: [sess] } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]);
+    if (!sess) return res.status(404).json({ error: 'Session not found' });
+    if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
+      return res.status(403).json({ error: 'Forbidden' });
+
+    const {
+      epochNum,
+      elapsedSeconds,
+      chittaBhumi,
+      chittaConfidence,
+      contemplativeDepth,
+      swara,
+      swaraConfidence,
+      bands = {},
+      gunas = {},
+      tattvaFlags = [],
+    } = req.body;
+
+    const { rows } = await pool.query(
+      `INSERT INTO session_epochs (
+          session_id, epoch_num, elapsed_seconds,
+          chitta_bhumi, chitta_confidence, contemplative_depth,
+          swara, swara_confidence,
+          delta_power, theta_power, alpha_power, beta_power, gamma_power,
+          sattva, rajas, tamas, guna_label,
+          tattva_flags
+        ) VALUES (
+          $1, $2, $3,
+          $4, $5, $6,
+          $7, $8,
+          $9, $10, $11, $12, $13,
+          $14, $15, $16, $17,
+          $18
+        ) RETURNING id`,
+      [
+        sessionId, epochNum || null, elapsedSeconds || null,
+        chittaBhumi || null, chittaConfidence || null, contemplativeDepth || null,
+        swara || null, swaraConfidence || null,
+        bands.delta ?? null, bands.theta ?? null, bands.alpha ?? null,
+        bands.beta  ?? null, bands.gamma ?? null,
+        gunas.sattva ?? null, gunas.rajas ?? null, gunas.tamas ?? null, gunas.label || null,
+        JSON.stringify(tattvaFlags),
+      ]
+    );
+    res.status(201).json({ ok: true, epochId: rows[0].id });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Session Analytics ─────────────────────────────────────────────────────────
+/**
+ * GET /api/sessions/:id/analytics
+ * Returns the full analytical summary for a session.
+ * Accessible by the session owner or any admin.
+ *
+ * Response:
+ * {
+ *   session: { ...session metadata },
+ *   epochs: [ ...all stored epochs ],
+ *   summary: {
+ *     totalEpochs,
+ *     durationSeconds,
+ *     avgBands: { delta, theta, alpha, beta, gamma },
+ *     avgGunas: { sattva, rajas, tamas },
+ *     dominantGuna,
+ *     stateBreakdown: { Kshipta:%, Vikshipta:%, Ekagra:%, Niruddha:% },
+ *     swaraBreakdown: { Ida:%, Pingala:%, Sushumna:% },
+ *     phases: [ { state, depth, from, to, epochCount, avgBands, avgGunas } ]
+ *   }
+ * }
+ */
+router.get('/sessions/:id/analytics', requireAuth, async (req, res) => {
+  try {
+    const sessionId = parseInt(req.params.id, 10);
+
+    // Fetch session
+    const { rows: [sess] } = await pool.query(
+      `SELECT s.*, u.username
+         FROM eeg_sessions s
+         LEFT JOIN users u ON s.user_id = u.id
+        WHERE s.id = $1`,
+      [sessionId]
+    );
+    if (!sess) return res.status(404).json({ error: 'Session not found' });
+    if (req.session.role !== 'admin' && sess.user_id !== req.session.userId)
+      return res.status(403).json({ error: 'Forbidden' });
+
+    // Fetch all epochs ordered by epoch_num
+    const { rows: epochRows } = await pool.query(
+      `SELECT * FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC, recorded_at ASC`,
+      [sessionId]
+    );
+
+    const epochs = epochRows.map(mapEpoch);
+
+    // Build summary
+    const summary = buildAnalyticsSummary(epochs, sess);
+
+    res.json({
+      session: mapSession(sess),
+      epochs,
+      summary,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+/**
+ * buildAnalyticsSummary — compute stats from stored epochs.
+ * Groups consecutive same-state epochs into "phases" for the timeline.
+ */
+function buildAnalyticsSummary(epochs, sess) {
+  if (!epochs.length) {
+    return {
+      totalEpochs: 0,
+      durationSeconds: sess.duration_seconds || null,
+      avgBands: null,
+      avgGunas: null,
+      dominantGuna: null,
+      stateBreakdown: {},
+      swaraBreakdown: {},
+      phases: [],
+    };
+  }
+
+  // Average bands
+  const bandKeys = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
+  const avgBands = {};
+  for (const k of bandKeys) {
+    const vals = epochs.map(e => e.bands[k]).filter(v => v != null);
+    avgBands[k] = vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(4) : null;
+  }
+
+  // Average gunas
+  const gunaKeys = ['sattva', 'rajas', 'tamas'];
+  const avgGunas = {};
+  for (const k of gunaKeys) {
+    const vals = epochs.map(e => e.gunas[k]).filter(v => v != null);
+    avgGunas[k] = vals.length ? +(vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(4) : null;
+  }
+
+  // Dominant guna
+  const dominantGuna = avgGunas.sattva != null
+    ? Object.entries(avgGunas).sort((a, b) => b[1] - a[1])[0][0]
+    : null;
+
+  // State breakdown (% of epochs)
+  const stateCounts = {};
+  for (const ep of epochs) {
+    if (ep.chittaBhumi) stateCounts[ep.chittaBhumi] = (stateCounts[ep.chittaBhumi] || 0) + 1;
+  }
+  const stateBreakdown = {};
+  for (const [state, count] of Object.entries(stateCounts)) {
+    stateBreakdown[state] = +((count / epochs.length) * 100).toFixed(1);
+  }
+
+  // Swara breakdown
+  const swaraCounts = {};
+  for (const ep of epochs) {
+    if (ep.swara) {
+      let key = 'Sushumna';
+      if (/ida/i.test(ep.swara))     key = 'Ida';
+      if (/pingala/i.test(ep.swara)) key = 'Pingala';
+      swaraCounts[key] = (swaraCounts[key] || 0) + 1;
+    }
+  }
+  const swaraBreakdown = {};
+  for (const [swara, count] of Object.entries(swaraCounts)) {
+    swaraBreakdown[swara] = +((count / epochs.length) * 100).toFixed(1);
+  }
+
+  // Build phases — consecutive runs of the same Chitta Bhumi state
+  const phases = [];
+  let currentPhase = null;
+
+  for (const ep of epochs) {
+    const state = ep.chittaBhumi || 'Unknown';
+    if (!currentPhase || currentPhase.state !== state) {
+      if (currentPhase) phases.push(finalizePhase(currentPhase));
+      currentPhase = {
+        state,
+        depth: ep.contemplativeDepth,
+        startEpoch: ep.epochNum,
+        endEpoch: ep.epochNum,
+        fromSeconds: ep.elapsedSeconds,
+        toSeconds: ep.elapsedSeconds,
+        epochCount: 1,
+        bandSums: Object.fromEntries(bandKeys.map(k => [k, ep.bands[k] ?? 0])),
+        gunaSums: Object.fromEntries(gunaKeys.map(k => [k, ep.gunas[k] ?? 0])),
+        validBands: Object.fromEntries(bandKeys.map(k => [k, ep.bands[k] != null ? 1 : 0])),
+        validGunas: Object.fromEntries(gunaKeys.map(k => [k, ep.gunas[k] != null ? 1 : 0])),
+      };
+    } else {
+      currentPhase.endEpoch  = ep.epochNum;
+      currentPhase.toSeconds = ep.elapsedSeconds;
+      currentPhase.epochCount++;
+      for (const k of bandKeys) {
+        if (ep.bands[k] != null) { currentPhase.bandSums[k] += ep.bands[k]; currentPhase.validBands[k]++; }
+      }
+      for (const k of gunaKeys) {
+        if (ep.gunas[k] != null) { currentPhase.gunaSums[k] += ep.gunas[k]; currentPhase.validGunas[k]++; }
+      }
+    }
+  }
+  if (currentPhase) phases.push(finalizePhase(currentPhase));
+
+  return {
+    totalEpochs: epochs.length,
+    durationSeconds: sess.duration_seconds || null,
+    avgBands,
+    avgGunas,
+    dominantGuna,
+    stateBreakdown,
+    swaraBreakdown,
+    phases,
+  };
+}
+
+function finalizePhase(p) {
+  const bandKeys = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
+  const gunaKeys = ['sattva', 'rajas', 'tamas'];
+  const avgBands = {};
+  const avgGunas = {};
+  for (const k of bandKeys) {
+    avgBands[k] = p.validBands[k] ? +(p.bandSums[k] / p.validBands[k]).toFixed(4) : null;
+  }
+  for (const k of gunaKeys) {
+    avgGunas[k] = p.validGunas[k] ? +(p.gunaSums[k] / p.validGunas[k]).toFixed(4) : null;
+  }
+  return {
+    state:       p.state,
+    depth:       p.depth,
+    startEpoch:  p.startEpoch,
+    endEpoch:    p.endEpoch,
+    fromSeconds: p.fromSeconds,
+    toSeconds:   p.toSeconds,
+    epochCount:  p.epochCount,
+    avgBands,
+    avgGunas,
+  };
+}
+
 // ── Admin: sessions grouped by user ──────────────────────────────────────────
 router.get('/admin/sessions/by-user', requireAdmin, async (_req, res) => {
   try {
     const { rows } = await pool.query(
       `SELECT s.id, s.user_id, u.username, s.name,
               s.start_time, s.end_time, s.duration_seconds
-       FROM eeg_sessions s
-       LEFT JOIN users u ON s.user_id = u.id
-       ORDER BY u.username, s.start_time DESC`
+         FROM eeg_sessions s
+         LEFT JOIN users u ON s.user_id = u.id
+        ORDER BY u.username, s.start_time DESC`
     );
     const grouped = {};
     for (const row of rows) {
