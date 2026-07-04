@@ -23,6 +23,15 @@ const MUSE_EEG_UUIDS = [
   '273e0006-4c4d-454d-96be-f03bac821358',
 ];
 
+// Muse S PPG UUIDs for heart rate and SpO2
+const MUSE_PPG_UUIDS = {
+  ambient: '273e000f-4c4d-454d-96be-f03bac821358',
+  ir:      '273e0010-4c4d-454d-96be-f03bac821358',
+  red:     '273e0011-4c4d-454d-96be-f03bac821358',
+};
+const PPG_SAMPLE_RATE = 64;
+const PPG_WINDOW_SAMPLES = PPG_SAMPLE_RATE * 8; // 8-second window
+
 const DEPTH_PCT = { Surface: 12, Emerging: 37, Deep: 62, Profound: 94 };
 const CHITTA_DEPTHS = { Kshipta: 'Surface', Vikshipta: 'Emerging', Ekagra: 'Deep', Niruddha: 'Profound' };
 const SWARA_NOTES = {
@@ -63,7 +72,12 @@ const bleChannels = [[], [], [], []];
 let blePhase = 0;
 let bleSamTick = 0;
 
-const waveBuf = new Float32Array(WAVE_LEN);
+// PPG state (Muse S heart rate / SpO2)
+    const ppgBuf = { ambient: [], ir: [], red: [] };
+    let latestHeartRate = null;
+    let latestSpO2 = null;
+
+    const waveBuf = new Float32Array(WAVE_LEN);
 let waveTail = 0;
 let wavePhase = 0;
 
@@ -982,6 +996,8 @@ $('btn-demo').addEventListener('click', () => {
       tattva_flags: tattva,
       contemplative_depth: depth,
       gunas: { sattva: +(Math.random()*0.6).toFixed(3), rajas: +(Math.random()*0.3).toFixed(3), tamas: +(Math.random()*0.1).toFixed(3) },
+      blood_oxygen: +(96 + Math.random() * 3).toFixed(1),
+      heart_rate: Math.round(60 + Math.random() * 25),
     };
     applyReading(r);
     storeEpochToSession(r);
@@ -1045,9 +1061,19 @@ async function connectBluetooth() {
       char.addEventListener('characteristicvaluechanged', ev => onMuseEEG(ev, ch));
     }
 
-    btDisconnect = () => { if (device.gatt.connected) device.gatt.disconnect(); };
+    // Muse S PPG subscription for heart rate and SpO2
+      for (const [key, uuid] of Object.entries(MUSE_PPG_UUIDS)) {
+        const ppgChar = await service.getCharacteristic(uuid).catch(() => null);
+        if (!ppgChar) continue;
+        await ppgChar.startNotifications();
+        ppgChar.addEventListener('characteristicvaluechanged', ev => onMusePPG(ev, key));
+      }
+      ppgBuf.ambient.length = 0; ppgBuf.ir.length = 0; ppgBuf.red.length = 0;
+      latestHeartRate = null; latestSpO2 = null;
 
-    // Stop backend URL polling — BT mode handles data directly
+      btDisconnect = () => { if (device.gatt.connected) device.gatt.disconnect(); };
+
+      // Stop backend URL polling — BT mode handles data directly
     if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = null; }
     mode = 'bluetooth';
     setStatus('bluetooth', 'BLE connected');
@@ -1098,7 +1124,12 @@ async function processBluetoothEEG() {
       const res = await fetch(backendUrl.replace(/\/$/, '') + '/analyze', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ eeg_data: snapshot, sample_rate: SAMPLE_RATE }),
+        body: JSON.stringify({
+            eeg_data: snapshot,
+            sample_rate: SAMPLE_RATE,
+            ...(latestSpO2 !== null     && { blood_oxygen: +latestSpO2.toFixed(1) }),
+            ...(latestHeartRate !== null && { heart_rate:  +latestHeartRate.toFixed(1) }),
+          }),
         signal: AbortSignal.timeout(15000),
       });
       if (!res.ok) {
@@ -1161,6 +1192,8 @@ function disconnectBluetooth() {
   const btRow = $('bt-device-row');
   if (btRow) btRow.style.display = 'none';
   bleChannels.forEach(ch => { ch.length = 0; });
+  ppgBuf.ambient.length = 0; ppgBuf.ir.length = 0; ppgBuf.red.length = 0;
+  latestHeartRate = null; latestSpO2 = null;
   mode = 'idle';
   setStatus('', 'disconnected');
   $('btn-bluetooth').classList.remove('bt-active');
@@ -1170,6 +1203,63 @@ function disconnectBluetooth() {
 
 function onBtDisconnected() {
   if (mode === 'bluetooth') disconnectBluetooth();
+}
+
+// ── Muse S PPG processing (heart rate + SpO2) ─────────────────────────────────
+function onMusePPG(ev, channel) {
+  const data = ev.target.value;
+  // Muse PPG: 2-byte header + 6 samples × 3 bytes uint24 big-endian
+  const buf = ppgBuf[channel];
+  for (let i = 2; i + 2 < data.byteLength; i += 3) {
+    buf.push((data.getUint8(i) << 16) | (data.getUint8(i + 1) << 8) | data.getUint8(i + 2));
+  }
+  if (buf.length > PPG_WINDOW_SAMPLES) buf.splice(0, buf.length - PPG_WINDOW_SAMPLES);
+
+  if (channel === 'ir' && buf.length >= PPG_WINDOW_SAMPLES) {
+    latestHeartRate = computeHeartRate(ppgBuf.ir);
+    if (ppgBuf.red.length >= PPG_WINDOW_SAMPLES) latestSpO2 = computeSpO2(ppgBuf.ir, ppgBuf.red);
+    const hrEl = $('val-hr'), spo2El = $('val-spo2');
+    const hrSt = $('hr-status'), spo2St = $('spo2-status');
+    if (hrEl && latestHeartRate != null) { hrEl.textContent = latestHeartRate.toFixed(0); if (hrSt) hrSt.textContent = 'live reading'; }
+    if (spo2El && latestSpO2 != null)   { spo2El.textContent = latestSpO2.toFixed(1);   if (spo2St) spo2St.textContent = 'live reading'; }
+  }
+}
+
+/** BPM from PPG IR via threshold peak detection */
+function computeHeartRate(signal) {
+  if (signal.length < 64) return null;
+  const mean = signal.reduce((a, b) => a + b, 0) / signal.length;
+  const ac = signal.map(v => v - mean);
+  const std = Math.sqrt(ac.reduce((s, v) => s + v * v, 0) / ac.length);
+  const thr = std * 0.5;
+  // 0.28 s refractory → supports up to ~214 BPM (covers athletic/stress range)
+  const minDist = Math.round(PPG_SAMPLE_RATE * 0.28);
+  const peaks = []; let lastPeak = -minDist;
+  for (let i = 1; i < ac.length - 1; i++) {
+    if (ac[i] > thr && ac[i] > ac[i - 1] && ac[i] > ac[i + 1] && (i - lastPeak) >= minDist) {
+      peaks.push(i); lastPeak = i;
+    }
+  }
+  if (peaks.length < 2) return null;
+  const rrs = peaks.slice(1).map((p, i) => p - peaks[i]);
+  const meanRR = rrs.reduce((a, b) => a + b, 0) / rrs.length;
+  const hr = (60 * PPG_SAMPLE_RATE) / meanRR;
+  return (hr >= 30 && hr <= 200) ? hr : null;
+}
+
+/** SpO2 % from red/IR ratio-of-ratios: SpO2 ≈ 110 − 25 × R */
+function computeSpO2(ir, red) {
+  if (ir.length < 64 || red.length < 64) return null;
+  const len = Math.min(ir.length, red.length);
+  const irS = ir.slice(-len), redS = red.slice(-len);
+  const mean = a => a.reduce((s, v) => s + v, 0) / a.length;
+  const acRms = a => { const m = mean(a); return Math.sqrt(a.reduce((s, v) => s + (v - m) ** 2, 0) / a.length); };
+  const dcIr = mean(irS), dcRed = mean(redS);
+  if (dcIr < 1 || dcRed < 1) return null;
+  const acIr = acRms(irS), acRed = acRms(redS);
+  if (acIr < 1 || acRed < 1) return null;
+  const R = (acRed / dcRed) / (acIr / dcIr);
+  return Math.min(100, Math.max(85, 110 - 25 * R));
 }
 
 // ── Backend URL mode ──────────────────────────────────────────────────────────
