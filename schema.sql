@@ -6,7 +6,13 @@
 
 -- 1. User role enum
 DO $$ BEGIN
-  CREATE TYPE user_role AS ENUM ('admin', 'user');
+  CREATE TYPE user_role AS ENUM ('admin', 'user', 'co-admin');
+EXCEPTION WHEN duplicate_object THEN NULL;
+END $$;
+
+-- 1b. If the enum already existed from a previous run, make sure 'co-admin' is present.
+DO $$ BEGIN
+  ALTER TYPE user_role ADD VALUE IF NOT EXISTS 'co-admin';
 EXCEPTION WHEN duplicate_object THEN NULL;
 END $$;
 
@@ -48,10 +54,11 @@ CREATE TABLE IF NOT EXISTS user_sessions (
 );
 CREATE INDEX IF NOT EXISTS idx_session_expire ON user_sessions (expire);
 
--- 6. Session epochs — per-epoch EEG data stored during live sessions
+-- 6. EEG epochs — per-epoch EEG data stored during live sessions
 --    Each epoch is one ~2-second inference window.
 --    This table powers the admin session analytics view.
-CREATE TABLE IF NOT EXISTS session_epochs (
+--    NOTE: table name must be `eeg_epochs` — this is what api/server.js queries.
+CREATE TABLE IF NOT EXISTS eeg_epochs (
   id                  SERIAL PRIMARY KEY,
   session_id          INTEGER NOT NULL REFERENCES eeg_sessions(id) ON DELETE CASCADE,
   epoch_num           INTEGER NOT NULL,               -- 1-based counter within session
@@ -81,7 +88,23 @@ CREATE TABLE IF NOT EXISTS session_epochs (
   guna_label          TEXT,                           -- Sattvic | Rajasic | Tamasic | Balanced
 
   -- Tattva flags (JSON array of strings)
-  tattva_flags        JSONB NOT NULL DEFAULT '[]'
+  tattva_flags        JSONB NOT NULL DEFAULT '[]',
+
+  -- Vitals (from BLE pulse oximeter / demo mode)
+  blood_oxygen        NUMERIC(5,2),                   -- SpO2 %
+  heart_rate          NUMERIC(5,2)                     -- BPM
 );
 
-CREATE INDEX IF NOT EXISTS idx_epoch_session ON session_epochs (session_id, epoch_num);
+CREATE INDEX IF NOT EXISTS idx_epoch_session ON eeg_epochs (session_id, epoch_num);
+
+-- 6b. Migration safety net: if an older deployment already created the table
+--     under the previous name/shape, bring it up to the current shape.
+DO $$ BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'session_epochs')
+     AND NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_name = 'eeg_epochs') THEN
+    ALTER TABLE session_epochs RENAME TO eeg_epochs;
+  END IF;
+END $$;
+
+ALTER TABLE eeg_epochs ADD COLUMN IF NOT EXISTS blood_oxygen NUMERIC(5,2);
+ALTER TABLE eeg_epochs ADD COLUMN IF NOT EXISTS heart_rate NUMERIC(5,2);
