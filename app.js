@@ -60,8 +60,10 @@ let adminCurrentTab     = 'users';
 let resetPwTargetUserId = null;
 
 const bleChannels = [[], [], [], []];
-let blePhase   = 0;
-let bleSamTick = 0;
+let blePhase      = 0;
+let bleSamTick    = 0;
+let bleProcessing  = false;
+let _aiChatInited  = false;
 
 const waveBuf  = new Float32Array(WAVE_LEN);
 let waveTail   = 0;
@@ -165,6 +167,9 @@ function showMainApp() {
   }
 
   loadSessionHistory();
+
+  // Init AI chat once per login
+  if (!_aiChatInited) { _aiChatInited = true; initAIChat(); }
 }
 
 function showAdminPage() {
@@ -783,7 +788,9 @@ function applyReading(r) {
   const bands = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
   bands.forEach(b => {
     const raw = spectrum[b] ?? null;
-    const pct = raw != null ? (raw * 100).toFixed(1) : null;
+    // Backend sends 0-100 percentages; local FFT gives 0-1 fractions. Normalise:
+      const frac = raw != null ? (raw > 1 ? raw / 100 : raw) : null;
+      const pct  = frac != null ? (frac * 100).toFixed(1) : null;
     const valEl = $('val-' + b);
     const barEl = $('bar-' + b);
     if (valEl) valEl.textContent = pct ? pct + '%' : '—';
@@ -1168,11 +1175,19 @@ async function connectBluetooth() {
 
     const controlChar = await service.getCharacteristic(MUSE_CONTROL_UUID).catch(() => null);
     if (controlChar) {
-      const enc = new TextEncoder();
-      await controlChar.writeValue(enc.encode('p21\n'));
-      await new Promise(r => setTimeout(r, 300));
-      await controlChar.writeValue(enc.encode('d\n'));
-    }
+      // Muse BLE protocol: first byte = total message length (incl. itself)
+        const museCmd = (cmd) => {
+          const b = new Uint8Array(cmd.length + 1);
+          b[0] = cmd.length + 1;
+          for (let i = 0; i < cmd.length; i++) b[i + 1] = cmd.charCodeAt(i);
+          return controlChar.writeValue(b);
+        };
+        await museCmd('h\n');            // halt any prior stream
+        await new Promise(r => setTimeout(r, 200));
+        await museCmd('p21\n');          // preset 21 = all EEG channels, 256 Hz
+        await new Promise(r => setTimeout(r, 400));
+        await museCmd('s\n');            // start streaming ('d\n' = disconnect, wrong!)
+      }
 
     for (let c = 0; c < MUSE_EEG_UUIDS.length; c++) {
       const char = await service.getCharacteristic(MUSE_EEG_UUIDS[c]).catch(() => null);
@@ -1201,10 +1216,14 @@ async function connectBluetooth() {
 function onMuseEEG(ev, ch) {
   const data    = ev.target.value;
   const samples = [];
-  for (let i = 2; i < data.byteLength - 1; i += 2) {
-    samples.push(data.getInt16(i, false) * 0.48828125e-6);
-  }
-  bleChannels[ch].push(...samples);
+  // Muse EEG: 2-byte packet counter + 12-bit values packed 2-per-3-bytes
+    // scale: (raw12 - 2048) × 0.48828125 μV
+    for (let i = 2; i + 2 < data.byteLength; i += 3) {
+      const b0 = data.getUint8(i), b1 = data.getUint8(i + 1), b2 = data.getUint8(i + 2);
+      samples.push(((( b0 << 4) | (b1 >> 4)) - 2048) * 0.48828125e-6);
+      samples.push((((b1 & 0x0f) << 8 | b2)  - 2048) * 0.48828125e-6);
+    }
+      bleChannels[ch].push(...samples);
   bleSamTick += samples.length;
 
   const buf = Math.min(bleChannels[0].length, COLLECT_N);
@@ -1214,6 +1233,9 @@ function onMuseEEG(ev, ch) {
 }
 
 async function processBluetoothEEG() {
+  if (bleProcessing) return;
+  bleProcessing = true;
+  try {
   const snapshot = bleChannels.map(ch => {
     const s = ch.slice(-COLLECT_N);
     ch.length = 0;
@@ -1271,6 +1293,7 @@ async function processBluetoothEEG() {
   const r    = classifyLocal(bp);
   r.latency_ms = parseFloat((performance.now() - t0).toFixed(1));
   applyReading(r);
+  } finally { bleProcessing = false; }
 }
 
 function disconnectBluetooth() {
@@ -1322,9 +1345,9 @@ async function connectBackendUrl(url) {
     }
   };
 
-  await poll();
-  if (backendPollTimer === null && mode === 'backend') return;
+  // Fix: start interval first so retries work even if first poll fails immediately
   backendPollTimer = setInterval(poll, 1500);
+  poll(); // fire once immediately without awaiting
 }
 
 // ── Stop everything ───────────────────────────────────────────────────────────
@@ -1629,3 +1652,185 @@ window.addEventListener('resize', resizeCanvas);
 
 // Start by checking auth — show login or main app accordingly
 checkAuth();
+
+
+  // ════════════════════════════════════════════════════════════════════════════
+  //  SWAMINARAYAN-YOGI AI MEDITATION GUIDE — Powered by xAI Grok
+  //  Only discusses: EEG data, Chitta Bhumi, Swara, Gunas, Vedic meditation,
+  //  BAPS Swaminarayan philosophy. Rejects all off-topic queries.
+  // ════════════════════════════════════════════════════════════════════════════
+
+  let aiChatOpen    = false;
+  let aiMessages    = [];   // { role: 'user'|'assistant', content: string }
+  let aiSessionList = [];   // sessions with EEG data
+  let aiSelectedSid = null;
+  let aiIsTyping    = false;
+
+  function toggleAIChat() {
+    aiChatOpen = !aiChatOpen;
+    const panel = $('ai-chat-panel');
+    const overlay = $('ai-chat-overlay');
+    if (aiChatOpen) {
+      panel.classList.add('open');
+      overlay.style.display = 'block';
+      if (!aiMessages.length) aiShowWelcome();
+      loadAISessions();
+      requestAnimationFrame(() => $('ai-input').focus());
+    } else {
+      panel.classList.remove('open');
+      overlay.style.display = 'none';
+    }
+  }
+
+  function aiShowWelcome() {
+    aiAddMessage('assistant',
+      '🙏 Jay Shree Swaminarayan, dear seeker.\n\n' +
+      'I am Swami Gyananand, your guide on the inner journey. ' +
+      'I can help you understand your EEG meditation data through the lens of ' +
+      'Chitta Bhumi, Swara, Trigunas, and BAPS Swaminarayan philosophy.\n\n' +
+      'Select a session above to let me analyse your brainwave patterns, ' +
+      'or ask me anything about your meditation journey. 🕉'
+    );
+  }
+
+  async function loadAISessions() {
+    try {
+      const sessions = await api('GET', '/ai/sessions');
+      aiSessionList = sessions;
+      const sel = $('ai-session-select');
+      sel.innerHTML = '<option value="">— Select session to analyse —</option>';
+      sessions.forEach(s => {
+        const opt = document.createElement('option');
+        opt.value = s.id;
+        opt.textContent = s.name + (s.epochCount ? ` (${s.epochCount} epochs)` : '');
+        if (s.id === aiSelectedSid) opt.selected = true;
+        sel.appendChild(opt);
+      });
+    } catch (e) {
+      console.warn('AI sessions load failed:', e.message);
+    }
+  }
+
+  function aiAddMessage(role, content, id) {
+    const msg = { role, content, id: id || Date.now() + role };
+    aiMessages.push(msg);
+    renderAIMessages();
+    return msg;
+  }
+
+  function aiUpdateMessage(id, content) {
+    const m = aiMessages.find(m => m.id === id);
+    if (m) { m.content = content; renderAIMessages(); }
+  }
+
+  function renderAIMessages() {
+    const list = $('ai-messages');
+    list.innerHTML = '';
+    for (const m of aiMessages) {
+      const div = document.createElement('div');
+      div.className = 'ai-bubble ai-bubble-' + m.role;
+      if (m.role === 'assistant') {
+        div.innerHTML = '<span class="ai-avatar">🕉</span><div class="ai-bubble-text">' 
+          + escHtml(m.content).replace(/\n/g, '<br>') + '</div>';
+      } else {
+        div.innerHTML = '<div class="ai-bubble-text">' + escHtml(m.content) + '</div>';
+      }
+      list.appendChild(div);
+    }
+    list.scrollTop = list.scrollHeight;
+  }
+
+  async function sendAIMessage() {
+    if (aiIsTyping) return;
+    const input = $('ai-input');
+    const text  = input.value.trim();
+    if (!text) return;
+    input.value = '';
+    input.style.height = 'auto';
+
+    aiAddMessage('user', text);
+
+    // Typing indicator
+    aiIsTyping = true;
+    $('ai-send').disabled = true;
+    const typingId = 'typing-' + Date.now();
+    aiAddMessage('assistant', '…', typingId);
+
+    try {
+      const body = {
+        message:    text,
+        sessionId:  aiSelectedSid || null,
+        history:    aiMessages.slice(0, -1).slice(-12).map(m => ({ role: m.role, content: m.content })),
+      };
+      const res = await fetch('/api/ai/chat', {
+        method:  'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body:    JSON.stringify(body),
+      });
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}));
+        throw new Error(err.error || 'Request failed');
+      }
+      const data = await res.json();
+      aiUpdateMessage(typingId, data.reply);
+    } catch (e) {
+      aiUpdateMessage(typingId, '🙏 Forgive me, dear seeker — I am unable to connect at this moment. Please try again shortly.');
+    } finally {
+      aiIsTyping    = false;
+      $('ai-send').disabled = false;
+      $('ai-input').focus();
+    }
+  }
+
+  // ── Wire AI chat UI ───────────────────────────────────────────────────────────
+  document.addEventListener('DOMContentLoaded', () => {});  // placeholder — wired below
+
+  function initAIChat() {
+    $('btn-ai-chat').addEventListener('click', toggleAIChat);
+    $('ai-chat-overlay').addEventListener('click', toggleAIChat);
+    $('btn-ai-close').addEventListener('click', toggleAIChat);
+
+    $('ai-session-select').addEventListener('change', (e) => {
+      aiSelectedSid = e.target.value || null;
+      if (aiSelectedSid) {
+        const sess = aiSessionList.find(s => s.id == aiSelectedSid);
+        if (sess) {
+          aiAddMessage('assistant',
+            `🕉 Jay Shree Swaminarayan! I have loaded your session "${escHtml(sess.name)}" (${sess.epochCount || 0} epochs).\n\nAsk me anything — how was your depth of focus? Which Guna was dominant? What does your Swara tell us? I am here to guide you.`
+          );
+        }
+      }
+    });
+
+    $('ai-send').addEventListener('click', sendAIMessage);
+
+    $('ai-input').addEventListener('keydown', (e) => {
+      if (e.key === 'Enter' && !e.shiftKey) {
+        e.preventDefault();
+        sendAIMessage();
+      }
+    });
+
+    $('ai-input').addEventListener('input', () => {
+      const el = $('ai-input');
+      el.style.height = 'auto';
+      el.style.height = Math.min(el.scrollHeight, 120) + 'px';
+    });
+
+    // Suggestion chips
+    document.querySelectorAll('.ai-chip').forEach(chip => {
+      chip.addEventListener('click', () => {
+        $('ai-input').value = chip.textContent;
+        sendAIMessage();
+      });
+    });
+  }
+
+  // Call initAIChat after DOM is ready (checkAuth -> showMainApp is the entry point)
+  // We hook it here — the header button exists after login anyway
+  const _origShowMainApp = showMainApp;
+  // Override showMainApp to also init AI chat once
+  let _aiChatInited = false;
+  
+initAIChat && typeof initAIChat === 'function' && null; // initAIChat called from showMainApp
