@@ -159,6 +159,8 @@ const mapEpoch = r => ({
     label: r.guna_label,
   },
   tattvaFlags: r.tattva_flags || [],
+  bloodOxygen: r.blood_oxygen != null ? parseFloat(r.blood_oxygen) : null,
+  heartRate: r.heart_rate != null ? parseFloat(r.heart_rate) : null,
 });
 
 // ── Router ────────────────────────────────────────────────────────────────────
@@ -394,13 +396,40 @@ router.get('/sessions/:id/analytics', requireAuth, async (req, res) => {
     const durationSeconds = lastEpoch.elapsed_seconds ? Math.ceil(parseFloat(lastEpoch.elapsed_seconds)) : null;
 
     const stateCounts = {};
+    const swaraCounts = {};
     let alphaSum = 0, thetaSum = 0, alphaCount = 0, thetaCount = 0;
+    let spo2Sum = 0, spo2Count = 0, hrSum = 0, hrCount = 0;
+    let sattvaSum = 0, rajasSum = 0, tamasSum = 0, gunaCount = 0;
+    const bandSums = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
+    const bandCounts = { delta: 0, theta: 0, alpha: 0, beta: 0, gamma: 0 };
     for (const ep of epochs) {
       if (ep.chitta_bhumi) stateCounts[ep.chitta_bhumi] = (stateCounts[ep.chitta_bhumi] || 0) + 1;
+      if (ep.swara) swaraCounts[ep.swara] = (swaraCounts[ep.swara] || 0) + 1;
       if (ep.alpha_power) { alphaSum += parseFloat(ep.alpha_power); alphaCount++; }
       if (ep.theta_power) { thetaSum += parseFloat(ep.theta_power); thetaCount++; }
+      if (ep.blood_oxygen != null) { spo2Sum += parseFloat(ep.blood_oxygen); spo2Count++; }
+      if (ep.heart_rate != null) { hrSum += parseFloat(ep.heart_rate); hrCount++; }
+      if (ep.sattva != null && ep.rajas != null && ep.tamas != null) {
+        sattvaSum += parseFloat(ep.sattva); rajasSum += parseFloat(ep.rajas); tamasSum += parseFloat(ep.tamas);
+        gunaCount++;
+      }
+      for (const k of ['delta', 'theta', 'alpha', 'beta', 'gamma']) {
+        const v = ep[k + '_power'];
+        if (v != null) { bandSums[k] += parseFloat(v); bandCounts[k]++; }
+      }
     }
     const dominantState = Object.entries(stateCounts).sort((a,b) => b[1]-a[1])[0]?.[0] || null;
+
+    const avgGunas = gunaCount
+      ? { sattva: sattvaSum / gunaCount, rajas: rajasSum / gunaCount, tamas: tamasSum / gunaCount }
+      : { sattva: null, rajas: null, tamas: null };
+    const dominantGuna = gunaCount
+      ? Object.entries(avgGunas).sort((a, b) => (b[1] ?? 0) - (a[1] ?? 0))[0][0]
+      : null;
+    const avgBands = {};
+    for (const k of ['delta', 'theta', 'alpha', 'beta', 'gamma']) {
+      avgBands[k] = bandCounts[k] ? bandSums[k] / bandCounts[k] : null;
+    }
 
     // Phase compression
     const phases = [];
@@ -455,11 +484,44 @@ router.get('/sessions/:id/analytics', requireAuth, async (req, res) => {
         durationSeconds,
         dominantState,
         stateCounts,
+        swaraCounts,
         avgAlpha: alphaCount ? alphaSum / alphaCount : null,
         avgTheta: thetaCount ? thetaSum / thetaCount : null,
+        avgBands,
+        avgGunas,
+        dominantGuna,
+        avgSpo2: spo2Count ? spo2Sum / spo2Count : null,
+        avgHr: hrCount ? hrSum / hrCount : null,
       },
       phases,
     });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// ── Session Notes ─────────────────────────────────────────────────────────────
+router.get('/sessions/:id/notes', requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { rows } = await pool.query('SELECT content FROM session_notes WHERE session_id = $1', [id]);
+    res.json({ content: rows[0]?.content || '' });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+router.put('/sessions/:id/notes', requireAuth, async (req, res) => {
+  try {
+    const id = parseInt(req.params.id, 10);
+    const { content = '' } = req.body;
+    await pool.query(
+      `INSERT INTO session_notes (session_id, content, updated_at)
+       VALUES ($1, $2, NOW())
+       ON CONFLICT (session_id) DO UPDATE SET content = $2, updated_at = NOW()`,
+      [id, content]
+    );
+    res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: e.message });
   }
