@@ -327,10 +327,24 @@ router.post('/sessions/:id/end', requireAuth, async (req, res) => {
   }
 });
 
+// ── Ownership helper ──────────────────────────────────────────────────────────
+// Returns the session row if it belongs to the requesting user, or null.
+// Admins/co-admins bypass the check so they can view any session.
+async function ownedSession(id, req) {
+  const { rows } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [id]);
+  if (!rows.length) return null;
+  const elevated = ['admin', 'co-admin'].includes(req.session.userRole);
+  if (!elevated && rows[0].user_id !== req.session.userId) return null;
+  return rows[0];
+}
+
 // ── Epochs ────────────────────────────────────────────────────────────────────
 router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
   try {
     const sessionId = parseInt(req.params.id, 10);
+    // FIX: verify the session belongs to this user before writing epoch data
+    const sess = await ownedSession(sessionId, req);
+    if (!sess) return res.status(403).json({ error: 'Forbidden' });
     const b = req.body;
 
     await pool.query(
@@ -367,6 +381,8 @@ router.post('/sessions/:id/epoch', requireAuth, async (req, res) => {
 router.get('/sessions/:id/epochs', requireAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
+    // FIX: IDOR — verify ownership before returning epoch data
+    if (!await ownedSession(id, req)) return res.status(403).json({ error: 'Forbidden' });
     const { rows } = await pool.query(
       'SELECT * FROM eeg_epochs WHERE session_id = $1 ORDER BY epoch_num ASC',
       [id]
@@ -381,6 +397,8 @@ router.get('/sessions/:id/epochs', requireAuth, async (req, res) => {
 router.get('/sessions/:id/analytics', requireAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
+    // FIX: IDOR — verify ownership before returning analytics
+    if (!await ownedSession(id, req)) return res.status(403).json({ error: 'Forbidden' });
     const { rows: epochs } = await pool.query(
       'SELECT * FROM eeg_epochs WHERE session_id = $1 ORDER BY epoch_num ASC',
       [id]
@@ -504,6 +522,8 @@ router.get('/sessions/:id/analytics', requireAuth, async (req, res) => {
 router.get('/sessions/:id/notes', requireAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
+    // FIX: IDOR — verify ownership before returning notes
+    if (!await ownedSession(id, req)) return res.status(403).json({ error: 'Forbidden' });
     const { rows } = await pool.query('SELECT content FROM session_notes WHERE session_id = $1', [id]);
     res.json({ content: rows[0]?.content || '' });
   } catch (e) {
@@ -514,6 +534,8 @@ router.get('/sessions/:id/notes', requireAuth, async (req, res) => {
 router.put('/sessions/:id/notes', requireAuth, async (req, res) => {
   try {
     const id = parseInt(req.params.id, 10);
+    // FIX: IDOR — verify ownership before writing notes
+    if (!await ownedSession(id, req)) return res.status(403).json({ error: 'Forbidden' });
     const { content = '' } = req.body;
     await pool.query(
       `INSERT INTO session_notes (session_id, content, updated_at)
