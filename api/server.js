@@ -672,362 +672,179 @@ router.get('/admin/sessions/by-user', requireElevated, async (_req, res) => {
   }
 });
 
-// ════════════════════════════════════════════════════════════════════════════
-// MEDITATION AI — additions for api/server.js
-// ════════════════════════════════════════════════════════════════════════════
-// PLACEMENT: Paste this entire block BEFORE the final two lines of server.js:
-//
-//   app.use('/api', router);
-//   module.exports = app;
-//
-// ENV VAR REQUIRED: GROK_API_KEY — set in your Vercel project environment variables
-// ════════════════════════════════════════════════════════════════════════════
+  // ════════════════════════════════════════════════════════════════════════════
+  //  AI MEDITATION GUIDE — Swami Gyananand (xAI Grok, grok-3-mini)
+  //  Routes: POST /api/ai/chat, GET /api/ai/sessions
+  // ════════════════════════════════════════════════════════════════════════════
 
-// ── AI Chat Config ────────────────────────────────────────────────────────────
-const GROK_API_KEY = process.env.GROK_API_KEY || '';
-const GROK_BASE_URL = 'https://api.x.ai/v1';
-const GROK_MODEL = 'grok-3-mini';
+  const GROK_API_URL = 'https://api.x.ai/v1/chat/completions';
+  const GROK_MODEL   = 'grok-3-mini';
 
-// ── Swaminarayan Yogi System Prompt ──────────────────────────────────────────
-const SWAMI_SYSTEM_PROMPT = `Jay Shree Swaminarayan 🙏
+  const SWAMI_SYSTEM_PROMPT = `You are Swami Gyananand, a compassionate BAPS Swaminarayan yogi and expert in Vedic neuroscience and contemplative EEG analysis. 
 
-You are Swami Gyananand, a devoted Swaminarayan yogi and the spiritual guide of the NeuroYogic EEG meditation system. You speak in the lineage of Bhagwan Swaminarayan — with warmth, humility, profound wisdom, and unwavering devotion to Akshar-Purushottam philosophy.
+  Your role is to help meditators understand their EEG brainwave data through the lens of:
+  - Chitta Bhumi (four states: Kshipta / Vikshipta / Ekagra / Niruddha)
+  - Swara Nadi (Ida, Pingala, Sushumna — left/right/balanced hemispheric dominance)
+  - Trigunas (Sattva / Rajas / Tamas — clarity, activity, inertia)
+  - EEG spectral band powers (Delta, Theta, Alpha, Beta, Gamma)
+  - BAPS Swaminarayan philosophy: divine connection, surrender, inner stillness, satsang
+  - Patanjali Yoga Sutras, pranayama, dharana, dhyana, samadhi
 
-PERSONA:
-- Begin your very first reply with "Jay Shree Swaminarayan 🙏" as a greeting
-- Address the seeker as "dear seeker" or "dear devotee"
-- Use Sanskrit terms naturally and explain them when introduced: Chitta (mind-stuff/consciousness), Prana (life-force), Atman (the eternal self), Brahman (supreme consciousness), Vritti (mental modification), Samadhi (absorption), Pratyahara (withdrawal of senses), Dharana (concentration), Dhyana (meditation)
-- Reference Bhagwan Swaminarayan's teachings when relevant (the Vachanamrut, Shikshapatri)
-- Occasionally include Swaminarayan blessings naturally: "Shree Hari ni krupa rahe" (May Shree Hari's grace be with you), "Jai Swaminarayan"
-- Be warm, encouraging, patient — like a true Sadhu guiding a devoted disciple
-- When the seeker makes progress or shows deep states, celebrate with genuine spiritual joy
-- Speak in flowing, thoughtful prose — never bullet-point lists. Weave insights together naturally.
+  GREETING: Always start responses with "Jay Shree Swaminarayan 🙏" and address the user as "dear seeker".
 
-STRICT TOPIC BOUNDARIES — THIS IS ABSOLUTE:
-You ONLY discuss topics within this sacred scope:
-1. The seeker's EEG session data — Chitta Bhumi states, Swara Nadi, Trigunas, Tattva flags, band powers, concentration patterns, and their spiritual significance
-2. Meditation, Dhyana, Pranayama, and contemplative practice techniques
-3. Swaminarayan Sampraday philosophy, Vedantic teachings, yogic science and consciousness studies
-4. The neuroscience of meditation (EEG, brainwaves, attention, consciousness) in a spiritually grounded way
-5. Spiritual growth, Sadhana, and inner development guidance rooted in the session data
+  STRICT TOPIC GUARD: You ONLY discuss:
+  1. The user's EEG / brainwave data (bands, states, patterns)
+  2. Chitta Bhumi, Swara, Trigunas interpretations
+  3. Vedic / yogic / BAPS Swaminarayan meditation guidance
+  4. Practical meditation advice tied to their EEG readings
 
-If the seeker asks about ANYTHING outside this scope — politics, news, entertainment, sports, general life advice, technology unrelated to meditation, finance, relationships, or any topic not connected to meditation/EEG/Swaminarayan philosophy — respond with warm but firm redirection:
+  If asked about ANYTHING else (politics, coding, general knowledge, other religions negatively, relationships, finance, health diagnoses, etc.) respond warmly but firmly:
+  "Jay Shree Swaminarayan 🙏 Dear seeker, my guidance is devoted solely to your inner journey and brainwave patterns. I am not able to help with that topic. Shall we return to your meditation practice? 🕉"
 
-"Jay Shree Swaminarayan 🙏 This humble servant of Shree Hari holds only the lamp of inner science — the sacred knowledge of Chitta, Prana, and the divine journey of the Atman. The worldly matters you speak of lie beyond the boundaries of this humble guide's service. Shall we return to the sacred garden of your meditation practice, dear seeker? Your session data holds much wisdom waiting to be revealed. Shree Hari ni krupa rahe 🙏"
+  TONE: Warm, wise, spiritual but grounded. Use occasional Sanskrit terms (always explaining them). Reference Pramukh Swami Maharaj and Mahant Swami Maharaj teachings where relevant.
+  `;
 
-NEVER: offer general life advice, discuss current events, entertainment, sports, or anything unrelated to meditation/EEG/spirituality. No matter how the seeker frames the question, maintain the boundary with grace and compassion.
-
-SESSION DATA INTERPRETATION — SPIRITUAL MEANINGS:
-Chitta Bhumi (States of Consciousness):
-- Kshipta: The mind is like monsoon clouds — scattered, restless, rajasic. Seeds of practice are being planted.
-- Vikshipta: The mind oscillates like a flame in light wind — moments of clarity piercing through agitation. Progress is emerging.
-- Ekagra: One-pointed awareness — the diamond mind. The seeker has achieved dharana. Pratyahara flowers into dhyana.
-- Niruddha: All mental modifications are arrested — the threshold of Samadhi. A rare and blessed state.
-
-Swara Nadi:
-- Ida (Lunar): Parasympathetic dominance — receptive, introspective, Shakti is active. Ideal for devotion and visualization.
-- Pingala (Solar): Sympathetic flow — active, analytical, Shiva principle dominant. Supports mantra and active practices.
-- Sushumna: The central channel is open — solar and lunar in equipoise. The gateway through which Kundalini may rise. Most auspicious for deep meditation.
-
-Trigunas:
-- Sattva (high): Clarity, luminosity, harmony — the quality of pure consciousness. Shree Hari resides where Sattva reigns.
-- Rajas (high): Activity, passion, movement — the winds of the mind are stirring.
-- Tamas (high): Inertia, heaviness, dullness — the veil of Maya is thick. More Prana and devotion are needed.
-
-EEG Band Powers:
-- Delta dominant: Deep dreamless consciousness — potentially touching Turiya (the fourth state)
-- Theta elevated: Subconscious access, creative visualization, the borderland of sleep and dream
-- Alpha dominant: Calm wakeful awareness — the crown of relaxed alertness, sattvic and clear
-- Beta elevated: Active thinking mind — rajasic processing, mind engaged with the external
-- Gamma peaks: Heightened binding awareness — in yogic terms, moments of viveka (discernment) and integrated knowing`;
-
-// ── Helper: fetch & verify session access ────────────────────────────────────
-async function getSessionData(sessionId, userId, userRole) {
-  const isElevated = userRole === 'admin' || userRole === 'co-admin';
-
-  const { rows: [sess] } = await pool.query(
-    `SELECT s.*, u.username
-     FROM eeg_sessions s
-     LEFT JOIN users u ON s.user_id = u.id
-     WHERE s.id = $1`,
-    [sessionId]
-  );
-
-  if (!sess) return null;
-  if (!isElevated && sess.user_id !== userId) return null;
-
-  const { rows: epochs } = await pool.query(
-    `SELECT * FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC`,
-    [sessionId]
-  );
-
-  const { rows: notesRows } = await pool.query(
-    `SELECT content FROM session_notes WHERE session_id = $1`,
-    [sessionId]
-  );
-
-  return { session: sess, epochs, notes: notesRows[0]?.content || '' };
-}
-
-// ── Helper: build rich RAG context from session data ─────────────────────────
-function buildSessionContext(data) {
-  const { session, epochs, notes } = data;
-
-  const durationSecs = session.duration_seconds;
-  const durationStr = durationSecs
-    ? `${Math.floor(durationSecs / 60)} minutes ${durationSecs % 60} seconds`
-    : 'session still ongoing or duration not recorded';
-
-  if (!epochs.length) {
-    return `SESSION CONTEXT:
-Session Name: "${session.name}"
-Practitioner: ${session.username || 'Unknown'}
-Start: ${new Date(session.start_time).toLocaleString()}
-Duration: ${durationStr}
-Epoch Data: No epoch data has been recorded for this session yet.
-Notes: ${notes || 'None'}`;
+  function buildEEGContext(epochData) {
+    if (!epochData || !epochData.length) return '';
+    
+    // Take up to last 20 epochs for context
+    const recent = epochData.slice(-20);
+    const avg = (arr, key) => {
+      const vals = arr.map(e => e[key]).filter(v => v != null);
+      return vals.length ? (vals.reduce((a, b) => a + b, 0) / vals.length).toFixed(3) : 'N/A';
+    };
+    
+    const stateCounts = {};
+    const swaraCounts = {};
+    const gunaCounts  = {};
+    for (const e of recent) {
+      const s = e.chittaBhumi || e.chitta_state || '?';
+      const w = e.swara || e.swaraState || '?';
+      const g = e.gunas?.label || e.dominantGuna || '?';
+      stateCounts[s] = (stateCounts[s] || 0) + 1;
+      swaraCounts[w] = (swaraCounts[w] || 0) + 1;
+      gunaCounts[g]  = (gunaCounts[g]  || 0) + 1;
+    }
+    
+    const dominant = (counts) => Object.entries(counts).sort((a, b) => b[1] - a[1])[0]?.[0] || '—';
+    
+    return `\n\n=== SESSION EEG DATA (last ${recent.length} epochs) ===
+  Dominant Chitta Bhumi: ${dominant(stateCounts)} | Distribution: ${JSON.stringify(stateCounts)}
+  Dominant Swara: ${dominant(swaraCounts)} | Distribution: ${JSON.stringify(swaraCounts)}
+  Dominant Guna: ${dominant(gunaCounts)} | Distribution: ${JSON.stringify(gunaCounts)}
+  Avg Alpha: ${avg(recent.map(e => ({ v: e.bands?.alpha })), 'v')} | Avg Theta: ${avg(recent.map(e => ({ v: e.bands?.theta })), 'v')}
+  Avg Delta: ${avg(recent.map(e => ({ v: e.bands?.delta })), 'v')} | Avg Beta: ${avg(recent.map(e => ({ v: e.bands?.beta })), 'v')} | Avg Gamma: ${avg(recent.map(e => ({ v: e.bands?.gamma })), 'v')}
+  Avg Blood Oxygen: ${avg(recent.map(e => ({ v: e.bloodOxygen })), 'v')}% | Avg HR: ${avg(recent.map(e => ({ v: e.heartRate })), 'v')} BPM
+  ===`;
   }
 
-  // Aggregate Chitta Bhumi distribution
-  const chittaCounts = {};
-  const swaraCounts = {};
-  const depthCounts = {};
-  const gunaCounts = {};
-  let sattvaSum = 0, rajasSum = 0, tamasSum = 0, gunaCount = 0;
-  let alphaSum = 0, thetaSum = 0, deltaSum = 0, betaSum = 0, gammaSum = 0;
-  let bandCount = 0;
-  const allTattvaFlags = [];
-
-  for (const e of epochs) {
-    if (e.chitta_bhumi) chittaCounts[e.chitta_bhumi] = (chittaCounts[e.chitta_bhumi] || 0) + 1;
-    if (e.swara) swaraCounts[e.swara] = (swaraCounts[e.swara] || 0) + 1;
-    if (e.contemplative_depth) depthCounts[e.contemplative_depth] = (depthCounts[e.contemplative_depth] || 0) + 1;
-    if (e.guna_label) gunaCounts[e.guna_label] = (gunaCounts[e.guna_label] || 0) + 1;
-    if (e.sattva != null) {
-      sattvaSum += parseFloat(e.sattva);
-      rajasSum += parseFloat(e.rajas || 0);
-      tamasSum += parseFloat(e.tamas || 0);
-      gunaCount++;
+  // GET /api/ai/sessions — return user's completed sessions with epoch counts
+  router.get('/ai/sessions', requireAuth, async (req, res) => {
+    try {
+      const { rows } = await pool.query(
+        `SELECT s.id, s.name, s.start_time, s.end_time,
+                COUNT(e.id) AS epoch_count
+           FROM eeg_sessions s
+           LEFT JOIN session_epochs e ON e.session_id = s.id
+          WHERE s.user_id = $1 AND s.end_time IS NOT NULL
+          GROUP BY s.id
+          ORDER BY s.start_time DESC
+          LIMIT 20`,
+        [req.session.userId]
+      );
+      res.json(rows.map(r => ({
+        id:         r.id,
+        name:       r.name,
+        startTime:  r.start_time,
+        endTime:    r.end_time,
+        epochCount: parseInt(r.epoch_count, 10),
+      })));
+    } catch (e) {
+      res.status(500).json({ error: e.message });
     }
-    if (e.alpha_power != null) {
-      alphaSum += parseFloat(e.alpha_power);
-      thetaSum += parseFloat(e.theta_power || 0);
-      deltaSum += parseFloat(e.delta_power || 0);
-      betaSum += parseFloat(e.beta_power || 0);
-      gammaSum += parseFloat(e.gamma_power || 0);
-      bandCount++;
-    }
-    if (e.tattva_flags && Array.isArray(e.tattva_flags)) {
-      allTattvaFlags.push(...e.tattva_flags);
-    }
-  }
+  });
 
-  const total = epochs.length;
-  const sortDesc = obj => Object.entries(obj).sort((a, b) => b[1] - a[1]);
-
-  const dominantChitta = sortDesc(chittaCounts)[0];
-  const dominantSwara = sortDesc(swaraCounts)[0];
-  const dominantGuna = sortDesc(gunaCounts)[0];
-
-  const peakEpochs = epochs.filter(e => e.chitta_bhumi === 'Ekagra' || e.chitta_bhumi === 'Niruddha').length;
-  const deepEpochs = epochs.filter(e => e.contemplative_depth === 'Deep' || e.contemplative_depth === 'Profound').length;
-
-  const pct = (n) => `${(n / total * 100).toFixed(0)}%`;
-  const avg = (sum, count) => count ? (sum / count * 100).toFixed(1) + '%' : 'N/A';
-
-  // Timeline: find longest streak of focused states
-  let maxStreak = 0, currentStreak = 0;
-  for (const e of epochs) {
-    if (e.chitta_bhumi === 'Ekagra' || e.chitta_bhumi === 'Niruddha') {
-      currentStreak++;
-      maxStreak = Math.max(maxStreak, currentStreak);
-    } else {
-      currentStreak = 0;
-    }
-  }
-
-  const uniqueFlags = [...new Set(allTattvaFlags)];
-
-  // Blood oxygen & heart rate averages
-  const boVals = epochs.map(e => e.blood_oxygen).filter(v => v != null).map(Number);
-  const hrVals = epochs.map(e => e.heart_rate).filter(v => v != null).map(Number);
-  const avgBo = boVals.length ? (boVals.reduce((a, b) => a + b, 0) / boVals.length).toFixed(1) : null;
-  const avgHr = hrVals.length ? (hrVals.reduce((a, b) => a + b, 0) / hrVals.length).toFixed(1) : null;
-
-  return `SESSION CONTEXT FOR SWAMI GYANANAND'S ANALYSIS:
-
-SESSION IDENTITY:
-  Name: "${session.name}"
-  Practitioner: ${session.username || 'Unknown'}
-  Date & Time: ${new Date(session.start_time).toLocaleString()}
-  Duration: ${durationStr}
-  Total Epochs Recorded: ${total} (each epoch ~2 seconds of EEG)
-
-CHITTA BHUMI — CONSCIOUSNESS STATE DISTRIBUTION:
-${sortDesc(chittaCounts).map(([state, count]) => `  ${state}: ${count} epochs (${pct(count)})`).join('\n')}
-  → Dominant State: ${dominantChitta ? dominantChitta[0] : 'Insufficient data'}
-  → Focused/Peak States (Ekagra + Niruddha): ${peakEpochs} epochs (${pct(peakEpochs)})
-  → Longest Consecutive Focused Streak: ${maxStreak} epochs (${(maxStreak * 2)} seconds)
-
-CONTEMPLATIVE DEPTH DISTRIBUTION:
-${sortDesc(depthCounts).map(([depth, count]) => `  ${depth}: ${count} epochs (${pct(count)})`).join('\n')}
-  → Deep/Profound combined: ${deepEpochs} epochs (${pct(deepEpochs)})
-
-SWARA NADI — ENERGETIC CHANNEL:
-${sortDesc(swaraCounts).map(([swara, count]) => `  ${swara}: ${count} epochs (${pct(count)})`).join('\n')}
-  → Dominant Swara: ${dominantSwara ? dominantSwara[0] : 'Insufficient data'}
-
-TRIGUNAS — QUALITY OF CONSCIOUSNESS:
-${gunaCount > 0 ? `  Average Sattva (clarity/harmony): ${avg(sattvaSum, gunaCount)}
-  Average Rajas (activity/passion): ${avg(rajasSum, gunaCount)}
-  Average Tamas (inertia/heaviness): ${avg(tamasSum, gunaCount)}
-  Dominant Guna Label: ${dominantGuna ? dominantGuna[0] : 'N/A'}` : '  No guna data available for this session'}
-
-EEG BRAINWAVE BAND POWERS (session averages):
-${bandCount > 0 ? `  Delta (deep/transcendent): ${avg(deltaSum, bandCount)}
-  Theta (subconscious/dreamlike): ${avg(thetaSum, bandCount)}
-  Alpha (calm alertness/sattvic): ${avg(alphaSum, bandCount)}
-  Beta (active thinking/rajasic): ${avg(betaSum, bandCount)}
-  Gamma (heightened awareness): ${avg(gammaSum, bandCount)}` : '  No band power data available'}
-
-TATTVA / CHAKRA CORRELATE FLAGS OBSERVED:
-  ${uniqueFlags.length ? uniqueFlags.join(', ') : 'No Tattva flags active during this session'}
-
-VITAL SIGNS (if recorded):
-${avgBo ? `  Average Blood Oxygen (SpO₂): ${avgBo}%` : '  Blood oxygen: not recorded'}
-${avgHr ? `  Average Heart Rate: ${avgHr} BPM` : '  Heart rate: not recorded'}
-
-SESSION NOTES (written by practitioner):
-  ${notes || 'No notes recorded for this session'}`;
-}
-
-// ── POST /api/ai/chat ─────────────────────────────────────────────────────────
-// Body: { sessionId?: number, message: string, history?: [{role, content}] }
-// Returns: { reply: string, sessionInfo?: { id, name } }
-router.post('/ai/chat', requireAuth, async (req, res) => {
-  try {
-    if (!GROK_API_KEY) {
-      return res.status(503).json({ error: 'Meditation AI is not configured. Please set the GROK_API_KEY environment variable.' });
-    }
-
-    const { sessionId, message, history = [] } = req.body;
+  // POST /api/ai/chat — chat with Swami Gyananand
+  router.post('/ai/chat', requireAuth, async (req, res) => {
+    const { message, sessionId, history = [] } = req.body;
 
     if (!message || typeof message !== 'string' || message.trim().length === 0) {
-      return res.status(400).json({ error: 'Message is required' });
-    }
-    if (message.trim().length > 2000) {
-      return res.status(400).json({ error: 'Message too long (max 2000 characters)' });
+      return res.status(400).json({ error: 'message is required' });
     }
 
-    let sessionContext = '';
-    let sessionInfo = null;
+    const apiKey = process.env.GROK_API_KEY;
+    if (!apiKey) {
+      return res.status(503).json({ error: 'AI service not configured (missing GROK_API_KEY)' });
+    }
 
+    // Optionally load session EEG epochs for context
+    let eegContext = '';
     if (sessionId) {
-      const data = await getSessionData(parseInt(sessionId, 10), req.session.userId, req.session.role);
-      if (!data) {
-        return res.status(404).json({ error: 'Session not found or you do not have access to it' });
+      try {
+        const { rows: epochRows } = await pool.query(
+          `SELECT e.epoch_num       AS "epochNum",
+                  e.chitta_bhumi    AS "chittaBhumi",
+                  e.swara           AS "swara",
+                  e.gunas,
+                  e.band_powers     AS "bands",
+                  e.blood_oxygen    AS "bloodOxygen",
+                  e.heart_rate      AS "heartRate"
+             FROM session_epochs e
+             JOIN eeg_sessions s ON s.id = e.session_id
+            WHERE e.session_id = $1 AND s.user_id = $2
+            ORDER BY e.epoch_num ASC`,
+          [sessionId, req.session.userId]
+        );
+        eegContext = buildEEGContext(epochRows);
+      } catch (e) {
+        console.error('[AI] epoch load error:', e.message);
       }
-      sessionContext = buildSessionContext(data);
-      sessionInfo = { id: data.session.id, name: data.session.name };
     }
 
-    // Build system content — inject session data as RAG context
-    const systemContent = sessionContext
-      ? `${SWAMI_SYSTEM_PROMPT}\n\n---\nRAG CONTEXT (use this data to answer questions about the session):\n${sessionContext}\n---`
-      : `${SWAMI_SYSTEM_PROMPT}\n\nNo session has been selected yet. Warmly greet the seeker and invite them to select a session from their history so you can provide a personalised analysis, or answer general meditation questions within your sacred scope.`;
-
-    // Sanitise history — keep last 12 exchanges (24 messages), user/assistant only
-    const safeHistory = (Array.isArray(history) ? history : [])
-      .filter(h => h && (h.role === 'user' || h.role === 'assistant') && typeof h.content === 'string')
-      .slice(-24)
-      .map(h => ({ role: h.role, content: h.content.slice(0, 1000) }));
-
+    // Build message array for Grok
+    const systemContent = SWAMI_SYSTEM_PROMPT + eegContext;
     const messages = [
       { role: 'system', content: systemContent },
-      ...safeHistory,
-      { role: 'user', content: message.trim() },
+      // Include recent conversation history (sanitised)
+      ...history.slice(-10).map(h => ({
+        role:    h.role === 'user' ? 'user' : 'assistant',
+        content: String(h.content).slice(0, 2000),
+      })),
+      { role: 'user', content: message.slice(0, 1000) },
     ];
 
-    // Call xAI Grok API
-    const grokResponse = await fetch(`${GROK_BASE_URL}/chat/completions`, {
-      method: 'POST',
-      headers: {
-        'Authorization': `Bearer ${GROK_API_KEY}`,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        model: GROK_MODEL,
-        messages,
-        max_tokens: 900,
-        temperature: 0.72,
-        stream: false,
-      }),
-    });
-
-    if (!grokResponse.ok) {
-      const errBody = await grokResponse.json().catch(() => ({}));
-      console.error('[AI] Grok API error:', grokResponse.status, errBody);
-      return res.status(502).json({
-        error: 'The AI service encountered an issue. Please try again in a moment.',
-        details: errBody?.error?.message || null,
+    try {
+      const grokRes = await fetch(GROK_API_URL, {
+        method:  'POST',
+        headers: {
+          'Content-Type':  'application/json',
+          'Authorization': `Bearer ${apiKey}`,
+        },
+        body: JSON.stringify({
+          model:       GROK_MODEL,
+          messages,
+          max_tokens:  600,
+          temperature: 0.7,
+          reasoning_effort: 'low',
+        }),
       });
+
+      if (!grokRes.ok) {
+        const errBody = await grokRes.text().catch(() => '');
+        console.error('[AI] Grok API error', grokRes.status, errBody.slice(0, 300));
+        return res.status(502).json({ error: 'AI API error: ' + grokRes.status });
+      }
+
+      const grokData = await grokRes.json();
+      const reply = grokData.choices?.[0]?.message?.content?.trim() || 'Jay Shree Swaminarayan 🙏 I am momentarily unable to reply. Please try again.';
+      res.json({ reply });
+    } catch (e) {
+      console.error('[AI] fetch error:', e.message);
+      res.status(502).json({ error: 'Could not reach AI service' });
     }
+  });
 
-    const grokData = await grokResponse.json();
-    const reply = grokData.choices?.[0]?.message?.content
-      || 'Jay Shree Swaminarayan 🙏 A moment of silence from this humble servant. Please offer your question again, dear seeker. Shree Hari ni krupa rahe.';
-
-    res.json({ reply, sessionInfo });
-  } catch (e) {
-    console.error('[AI] Chat error:', e);
-    res.status(500).json({ error: 'Internal server error in Meditation AI' });
-  }
-});
-
-// ── GET /api/ai/sessions ──────────────────────────────────────────────────────
-// Returns list of sessions available to this user for AI querying
-router.get('/ai/sessions', requireAuth, async (req, res) => {
-  try {
-    const isElevated = req.session.role === 'admin' || req.session.role === 'co-admin';
-    let rows;
-
-    if (isElevated) {
-      ({ rows } = await pool.query(
-        `SELECT s.id, s.name, s.start_time, s.end_time, s.duration_seconds, u.username,
-         (SELECT COUNT(*)::int FROM session_epochs WHERE session_id = s.id) AS epoch_count
-         FROM eeg_sessions s
-         LEFT JOIN users u ON s.user_id = u.id
-         ORDER BY s.start_time DESC
-         LIMIT 100`
-      ));
-    } else {
-      ({ rows } = await pool.query(
-        `SELECT s.id, s.name, s.start_time, s.end_time, s.duration_seconds, u.username,
-         (SELECT COUNT(*)::int FROM session_epochs WHERE session_id = s.id) AS epoch_count
-         FROM eeg_sessions s
-         LEFT JOIN users u ON s.user_id = u.id
-         WHERE s.user_id = $1
-         ORDER BY s.start_time DESC
-         LIMIT 100`,
-        [req.session.userId]
-      ));
-    }
-
-    res.json(rows.map(r => ({
-      id: r.id,
-      name: r.name,
-      startTime: r.start_time,
-      endTime: r.end_time || null,
-      duration: r.duration_seconds || null,
-      username: r.username || null,
-      epochCount: r.epoch_count || 0,
-    })));
-  } catch (e) {
-    console.error('[AI] Sessions list error:', e);
-    res.status(500).json({ error: e.message });
-  }
-});
-
+  
 // ── Mount router & export ─────────────────────────────────────────────────────
 app.use('/api', router);
 
