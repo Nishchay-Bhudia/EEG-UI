@@ -292,7 +292,7 @@ $('btn-cancel-create-user').addEventListener('click', () => {
   $('create-user-form').style.display = 'none';
 });
 
-$('btn-create-user-submit').addEventListener('click', async () => {
+$('btn-create-user').addEventListener('click', async () => {
   const username = $('new-username').value.trim();
   const password = $('new-password').value;
   const role = $('new-role').value;
@@ -347,26 +347,33 @@ async function loadAdminUsers() {
     }
     users.forEach(u => {
       const isSelf = u.id === currentUser.id;
+      const roleClass = 'role-' + u.role.replace('-', '_');
       const roleSelector = !isSelf ? `
-        <select data-action="select-role">
+        <select class="field-input field-input-xs" data-action="select-role">
           <option value="user" ${u.role==='user'?'selected':''}>user</option>
           <option value="co-admin" ${u.role==='co-admin'?'selected':''}>co-admin</option>
           <option value="admin" ${u.role==='admin'?'selected':''}>admin</option>
         </select>
-        <button data-action="change-role" data-uid="${u.id}">Apply</button>
+        <button class="btn btn-primary btn-sm" data-action="change-role" data-uid="${u.id}">Apply</button>
       ` : '';
 
       const tr = document.createElement('tr');
       tr.innerHTML = `
         <td><strong>${escHtml(u.username)}</strong></td>
-        <td>${escHtml(u.role)}</td>
+        <td><span class="role-badge ${roleClass}">${escHtml(u.role)}</span></td>
         <td>${formatDate(u.createdAt)}</td>
-        <td>${roleSelector}</td>
         <td>
-          <button data-action="reset-pw" data-uid="${u.id}">Reset PW</button>
-          ${!isSelf
-            ? `<button data-action="delete-user" data-uid="${u.id}">Delete</button>`
-            : '<span>(you)</span>'}
+          <div class="table-actions">
+            ${roleSelector}
+          </div>
+        </td>
+        <td>
+          <div class="table-actions">
+            <button class="btn btn-ghost btn-sm" data-action="reset-pw" data-uid="${u.id}">Reset PW</button>
+            ${!isSelf
+              ? `<button class="btn btn-danger btn-sm" data-action="delete-user" data-uid="${u.id}">Delete</button>`
+              : '<span class="role-badge role-user">you</span>'}
+          </div>
         </td>
       `;
       tbody.appendChild(tr);
@@ -437,9 +444,9 @@ async function loadAdminSessions() {
         <td><strong>${escHtml(s.name)}</strong></td>
         <td>${formatDate(s.startTime)}</td>
         <td>${s.duration ? formatDuration(s.duration) : (s.endTime ? '—' : '<em>active</em>')}</td>
-        <td id="epoch-count-${s.id}">—</td>
+        <td><span class="epoch-badge" id="epoch-count-${s.id}">—</span></td>
         <td>
-          <button data-action="view-analytics" data-sid="${s.id}" data-sname="${escHtml(s.name)}">
+          <button class="btn btn-secondary btn-sm" data-action="view-analytics" data-sid="${s.id}" data-sname="${escHtml(s.name)}">
             View Analytics
           </button>
         </td>
@@ -474,57 +481,129 @@ $('admin-sessions-tbody').addEventListener('click', async e => {
 // ── Session Analytics Overlay ─────────────────────────────────────────────────
 $('btn-close-analytics').addEventListener('click', () => {
   $('analytics-overlay').style.display = 'none';
+  stopReplay();
 });
 
 $('analytics-overlay').addEventListener('click', e => {
-  if (e.target === $('analytics-overlay')) $('analytics-overlay').style.display = 'none';
+  if (e.target === $('analytics-overlay')) {
+    $('analytics-overlay').style.display = 'none';
+    stopReplay();
+  }
 });
+
+function setAnalyticsState(state) {
+  // state: 'loading' | 'error' | 'content'
+  $('analytics-loading').style.display = state === 'loading' ? '' : 'none';
+  $('analytics-error').style.display = state === 'error' ? '' : 'none';
+  $('analytics-content').style.display = state === 'content' ? '' : 'none';
+}
 
 async function openSessionAnalytics(sessionId, sessionName) {
   currentAnalyticsSessionId = sessionId;
   $('analytics-session-name').textContent = sessionName || 'Session';
+  $('analytics-session-meta').textContent = '';
   $('analytics-overlay').style.display = '';
-  $('analytics-summary').innerHTML = 'Loading…';
-  $('analytics-phases').innerHTML = '';
+  setAnalyticsState('loading');
 
   try {
     const data = await api('GET', '/sessions/' + sessionId + '/analytics');
-    renderAnalyticsSummary(data.summary);
-    renderAnalyticsPhases(data.phases || []);
+    renderAnalyticsSummary(data.summary || {});
+    renderAnalyticsTimeline(data.phases || []);
+    setAnalyticsState('content');
     loadReplayData();
+    loadAnalyticsNotes(sessionId);
   } catch (err) {
-    $('analytics-summary').innerHTML = `<p style="color:var(--error)">${escHtml(err.message)}</p>`;
+    $('analytics-error').textContent = err.message;
+    setAnalyticsState('error');
   }
 }
 
+function pct(v) { return v != null ? Math.round(v * 100) + '%' : '—'; }
+
 function renderAnalyticsSummary(s) {
-  if (!s) { $('analytics-summary').innerHTML = '<p>No data.</p>'; return; }
-  $('analytics-summary').innerHTML = `
-    <div class="summary-grid">
-      <div><span class="lbl">Total Epochs</span><span class="val">${s.totalEpochs ?? '—'}</span></div>
-      <div><span class="lbl">Duration</span><span class="val">${s.durationSeconds ? formatDuration(s.durationSeconds) : '—'}</span></div>
-      <div><span class="lbl">Dominant State</span><span class="val">${s.dominantState ?? '—'}</span></div>
-      <div><span class="lbl">Avg Alpha</span><span class="val">${s.avgAlpha != null ? (s.avgAlpha * 100).toFixed(1) + '%' : '—'}</span></div>
-      <div><span class="lbl">Avg Theta</span><span class="val">${s.avgTheta != null ? (s.avgTheta * 100).toFixed(1) + '%' : '—'}</span></div>
-    </div>
-  `;
+  $('a-total-epochs').textContent = s.totalEpochs ?? '—';
+  $('a-duration').textContent = s.durationSeconds ? formatDuration(s.durationSeconds) : '—';
+  $('a-dominant-guna').textContent = s.dominantGuna ? capitalize(s.dominantGuna) : '—';
+  $('a-dominant-state').textContent = s.dominantState ?? '—';
+  $('a-avg-spo2').textContent = s.avgSpo2 != null ? s.avgSpo2.toFixed(1) : '—';
+  $('a-avg-hr').textContent = s.avgHr != null ? s.avgHr.toFixed(0) : '—';
+
+  const gunas = s.avgGunas || {};
+  ['sattva', 'rajas', 'tamas'].forEach(g => {
+    const barEl = $('a-bar-' + g);
+    const pctEl = $('a-pct-' + g);
+    if (barEl) barEl.style.width = (gunas[g] != null ? Math.round(gunas[g] * 100) : 0) + '%';
+    if (pctEl) pctEl.textContent = pct(gunas[g]);
+  });
+
+  renderBreakdown('a-state-breakdown', s.stateCounts || {}, s.totalEpochs || 0);
+  renderBreakdown('a-swara-breakdown', s.swaraCounts || {}, s.totalEpochs || 0);
+
+  const bandsEl = $('a-avg-bands');
+  if (bandsEl) {
+    const syms = { delta: 'δ', theta: 'θ', alpha: 'α', beta: 'β', gamma: 'γ' };
+    const avgBands = s.avgBands || {};
+    bandsEl.innerHTML = ['delta', 'theta', 'alpha', 'beta', 'gamma'].map(b => `
+      <div class="analytics-band-pill">
+        <span class="analytics-band-sym">${syms[b]}</span>
+        <span class="analytics-band-name">${b}</span>
+        <span class="analytics-band-val">${pct(avgBands[b])}</span>
+      </div>
+    `).join('');
+  }
 }
 
-function renderAnalyticsPhases(phases) {
-  if (!phases.length) { $('analytics-phases').innerHTML = '<p>No phase data.</p>'; return; }
-  $('analytics-phases').innerHTML = phases.map(p => `
-    <div class="phase-card">
+function renderBreakdown(containerId, counts, total) {
+  const el = $(containerId);
+  if (!el) return;
+  const entries = Object.entries(counts).sort((a, b) => b[1] - a[1]);
+  if (!entries.length) { el.innerHTML = '<p style="color:var(--text-muted);font-size:12px">No data.</p>'; return; }
+  el.innerHTML = entries.map(([label, count]) => {
+    const p = total ? Math.round((count / total) * 100) : 0;
+    return `
+      <div class="breakdown-item">
+        <span class="breakdown-label">${escHtml(label)}</span>
+        <div class="breakdown-bar-bg"><div class="breakdown-bar" style="width:${p}%"></div></div>
+        <span class="breakdown-pct">${p}%</span>
+      </div>
+    `;
+  }).join('');
+}
+
+function capitalize(s) { return s ? s.charAt(0).toUpperCase() + s.slice(1) : s; }
+
+function renderAnalyticsTimeline(phases) {
+  const el = $('a-timeline');
+  if (!el) return;
+  if (!phases.length) { el.innerHTML = '<p style="color:var(--text-muted);font-size:12px">No phase data.</p>'; return; }
+  el.innerHTML = phases.map(p => `
+    <div class="timeline-phase">
       <strong>${escHtml(p.state)}</strong>
+      <span>${escHtml(p.depth || '')}</span>
       <span>${formatTime(p.fromSeconds)} – ${formatTime(p.toSeconds)}</span>
       <span>${p.epochCount} epochs</span>
     </div>
   `).join('');
 }
 
+// ── Session Notes (analytics modal) ───────────────────────────────────────────
+async function loadAnalyticsNotes(sessionId) {
+  const el = $('a-notes-content');
+  if (!el) return;
+  try {
+    const data = await api('GET', '/sessions/' + sessionId + '/notes');
+    el.innerHTML = data.content
+      ? escHtml(data.content).replace(/\n/g, '<br>')
+      : '<em class="analytics-notes-empty">No notes recorded for this session.</em>';
+  } catch {
+    el.innerHTML = '<em class="analytics-notes-empty">No notes recorded for this session.</em>';
+  }
+}
+
 // ── Replay Player ─────────────────────────────────────────────────────────────
-$('btn-replay-prev').addEventListener('click', () => { updateReplayDisplay(replayIndex - 1); });
-$('btn-replay-next').addEventListener('click', () => { updateReplayDisplay(replayIndex + 1); });
-$('btn-replay-play').addEventListener('click', () => {
+$('replay-prev').addEventListener('click', () => { updateReplayDisplay(replayIndex - 1); });
+$('replay-next').addEventListener('click', () => { updateReplayDisplay(replayIndex + 1); });
+$('replay-play-pause').addEventListener('click', () => {
   if (replayPlaying) stopReplay(); else startReplay();
 });
 $('replay-slider').addEventListener('input', e => { updateReplayDisplay(parseInt(e.target.value, 10)); });
@@ -532,7 +611,7 @@ $('replay-slider').addEventListener('input', e => { updateReplayDisplay(parseInt
 function startReplay() {
   if (!replayEpochs.length) return;
   replayPlaying = true;
-  $('btn-replay-play').textContent = '⏸';
+  $('replay-play-pause').textContent = '⏸ Pause';
   replayTimer = setInterval(() => {
     if (replayIndex >= replayEpochs.length - 1) { stopReplay(); return; }
     updateReplayDisplay(replayIndex + 1);
@@ -542,7 +621,7 @@ function startReplay() {
 function stopReplay() {
   replayPlaying = false;
   clearInterval(replayTimer); replayTimer = null;
-  $('btn-replay-play').textContent = '▶';
+  $('replay-play-pause').textContent = '▶ Play';
 }
 
 async function loadReplayData() {
@@ -611,9 +690,25 @@ function updateReplayDisplay(idx) {
     contemplative_depth: ep.contemplativeDepth,
     alpha_asymmetry: 0,
     gunas: ep.gunas || null,
+    blood_oxygen: ep.bloodOxygen,
+    heart_rate: ep.heartRate,
     latency_ms: null,
     data_quality: '⏪ replay',
   });
+
+  // Replay state summary panel
+  const stateValEl = $('replay-state-val');
+  const swaraValEl = $('replay-swara-val');
+  const gunaValEl = $('replay-guna-val');
+  const alphaValEl = $('replay-alpha-val');
+  const spo2ValEl = $('replay-spo2-val');
+  const hrValEl = $('replay-hr-val');
+  if (stateValEl) stateValEl.textContent = ep.chittaBhumi || '—';
+  if (swaraValEl) swaraValEl.textContent = ep.swara || '—';
+  if (gunaValEl) gunaValEl.textContent = ep.gunas?.label || '—';
+  if (alphaValEl) alphaValEl.textContent = ep.bands?.alpha != null ? Math.round(ep.bands.alpha * 100) + '%' : '—';
+  if (spo2ValEl) spo2ValEl.textContent = ep.bloodOxygen != null ? ep.bloodOxygen.toFixed(1) + '%' : '—';
+  if (hrValEl) hrValEl.textContent = ep.heartRate != null ? ep.heartRate.toFixed(0) + ' bpm' : '—';
 }
 
 // ── Session management ────────────────────────────────────────────────────────
@@ -631,6 +726,8 @@ $('btn-start-session').addEventListener('click', async () => {
     $('session-status').style.display = '';
     $('btn-start-session').style.display = 'none';
     $('btn-end-session').style.display = '';
+    $('session-notes').value = '';
+    $('session-notes').disabled = false;
 
     clearInterval(sessionTimerInterval);
     sessionTimerInterval = setInterval(() => {
@@ -653,26 +750,48 @@ $('btn-end-session').addEventListener('click', async () => {
   $('session-status').style.display = 'none';
   $('btn-start-session').style.display = '';
   $('btn-end-session').style.display = 'none';
+  $('session-notes').disabled = true;
   await loadSessionHistory();
 });
 
+// ── Session notes autosave (debounced) ────────────────────────────────────────
+$('session-notes').disabled = true;
+$('session-notes').addEventListener('input', () => {
+  if (!activeSession) return;
+  clearTimeout(notesSaveTimeout);
+  notesSaveTimeout = setTimeout(async () => {
+    try {
+      await api('PUT', '/sessions/' + activeSession.id + '/notes', { content: $('session-notes').value });
+    } catch { /* ignore — will retry on next keystroke */ }
+  }, 800);
+});
+
 async function loadSessionHistory() {
-  const list = $('session-history-list');
+  const list = $('history-list');
   if (!list) return;
   try {
     const sessions = await api('GET', '/sessions/mine');
     list.innerHTML = '';
     if (!sessions.length) {
-      list.innerHTML = '<li style="color:var(--text-muted)">No sessions yet</li>';
+      list.innerHTML = '<div id="history-empty" class="history-empty">No sessions yet</div>';
       return;
     }
     sessions.slice(0, 5).forEach(s => {
-      const li = document.createElement('li');
-      li.textContent = `${s.name} — ${formatDate(s.startTime)}`;
-      list.appendChild(li);
+      const item = document.createElement('div');
+      item.className = 'history-item';
+      item.textContent = `${s.name} — ${formatDate(s.startTime)}`;
+      list.appendChild(item);
     });
   } catch { /* ignore */ }
 }
+
+$('btn-toggle-history').addEventListener('click', () => {
+  const list = $('history-list');
+  const btn = $('btn-toggle-history');
+  const isHidden = list.style.display === 'none';
+  list.style.display = isHidden ? '' : 'none';
+  btn.textContent = isHidden ? 'Hide' : 'Show';
+});
 
 // Store epoch to database (fire-and-forget)
 function storeEpochToSession(r) {
@@ -1181,7 +1300,7 @@ function drawWave() {
 // ── Status indicator ──────────────────────────────────────────────────────────
 function setStatus(cls, text) {
   const dot = $('status-dot');
-  const lbl = $('status-label');
+  const lbl = $('status-text');
   if (dot) dot.className = 'status-dot' + (cls ? ' ' + cls : '');
   if (lbl) lbl.textContent = text;
 }
@@ -1278,8 +1397,8 @@ function applyReading(r) {
   bands.forEach(b => {
     const raw = spectrum[b] ?? null;
     const pctVal = raw != null ? Math.round(raw * 100) : null;
-    const barEl = $('band-bar-' + b);
-    const valEl = $('band-val-' + b);
+    const barEl = $('bar-' + b);
+    const valEl = $('val-' + b);
     if (barEl) barEl.style.width = (pctVal ?? 0) + '%';
     if (valEl) valEl.textContent = pctVal != null ? pctVal + '%' : '—';
   });
@@ -1299,22 +1418,32 @@ function applyReading(r) {
   gunaKeys.forEach(g => {
     const val = gunas[g] ?? null;
     const pctVal = val != null ? Math.round(val * 100) : null;
-    const barEl = $('guna-bar-' + g);
-    const valEl = $('guna-val-' + g);
+    const barEl = $('bar-' + g);
+    const valEl = $('val-' + g);
     if (barEl) barEl.style.width = (pctVal ?? 0) + '%';
     if (valEl) valEl.textContent = pctVal != null ? pctVal + '%' : '—';
   });
 
   const gunaLabel = gunas.label || (gunas.sattva > gunas.rajas && gunas.sattva > gunas.tamas ? 'Sattvic'
     : gunas.rajas > gunas.tamas ? 'Rajasic' : gunas.tamas ? 'Tamasic' : '—');
-  const gunaLblEl = $('guna-label');
-  if (gunaLblEl) gunaLblEl.textContent = gunaLabel || '—';
+  const gunaDominantEl = $('gunas-dominant');
+  const gunaNoteEl = $('gunas-note');
+  if (gunaDominantEl) gunaDominantEl.textContent = gunaLabel || '—';
+  if (gunaNoteEl) {
+    gunaNoteEl.textContent = gunaLabel === 'Sattvic' ? 'clarity & balance dominant'
+      : gunaLabel === 'Rajasic' ? 'activity & passion dominant'
+      : gunaLabel === 'Tamasic' ? 'inertia & heaviness dominant' : '';
+  }
 
   // ── Blood oxygen / heart rate (if device supports) ──
-  const boEl = $('val-blood-oxygen');
-  const hrEl = $('val-heart-rate');
-  if (boEl) boEl.textContent = r.blood_oxygen != null ? r.blood_oxygen.toFixed(1) + '%' : '—';
-  if (hrEl) hrEl.textContent = r.heart_rate != null ? r.heart_rate.toFixed(0) + ' bpm' : '—';
+  const spo2El = $('val-spo2');
+  const hrEl = $('val-hr');
+  const spo2StatusEl = $('spo2-status');
+  const hrStatusEl = $('hr-status');
+  if (spo2El) spo2El.textContent = r.blood_oxygen != null ? r.blood_oxygen.toFixed(1) : '—';
+  if (hrEl) hrEl.textContent = r.heart_rate != null ? r.heart_rate.toFixed(0) : '—';
+  if (spo2StatusEl) spo2StatusEl.textContent = r.blood_oxygen != null ? 'live reading' : 'awaiting signal';
+  if (hrStatusEl) hrStatusEl.textContent = r.heart_rate != null ? 'live reading' : 'awaiting signal';
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
