@@ -333,7 +333,7 @@ router.post('/sessions/:id/end', requireAuth, async (req, res) => {
 async function ownedSession(id, req) {
   const { rows } = await pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [id]);
   if (!rows.length) return null;
-  const elevated = ['admin', 'co-admin'].includes(req.session.userRole);
+  const elevated = ['admin', 'co-admin'].includes(req.session.role); // FIX: was req.session.userRole (always undefined)
   if (!elevated && rows[0].user_id !== req.session.userId) return null;
   return rows[0];
 }
@@ -573,7 +573,11 @@ router.get('/admin/sessions/by-user', requireElevated, async (_req, res) => {
 
 // ── AI Baba (RAG Chat over EEG session data) ─────────────────────────────────
 const Groq = require('groq-sdk');
-const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+// FIX: Guard Groq init — without this, missing GROQ_API_KEY throws at module load time,
+// crashing the entire Vercel function before Express can handle any request (including login).
+const groq = process.env.GROQ_API_KEY
+  ? new Groq({ apiKey: process.env.GROQ_API_KEY })
+  : null;
 const AI_MODEL = 'llama-3.1-8b-instant';
 
 // Hard token budget: cap full epoch log to prevent context overflow.
@@ -734,11 +738,12 @@ ${epochLog}
 // GET /api/ai/sessions — list the logged-in user's sessions (for the session picker UI)
 router.get('/ai/sessions', requireAuth, async (req, res) => {
   try {
+    if (!groq) return res.status(503).json({ error: 'AI Baba is not configured — set GROQ_API_KEY in Vercel environment variables.' });
     const { rows } = await pool.query(
       `SELECT s.id, s.name, s.start_time, s.end_time, s.duration_seconds,
               COUNT(e.id)::int AS epoch_count
        FROM eeg_sessions s
-       LEFT JOIN session_epochs e ON e.session_id = s.id
+       LEFT JOIN eeg_epochs e ON e.session_id = s.id
        WHERE s.user_id = $1
        GROUP BY s.id
        ORDER BY s.start_time DESC`,
@@ -753,6 +758,7 @@ router.get('/ai/sessions', requireAuth, async (req, res) => {
 // POST /api/ai/start — generate an AI summary for a session (no full epoch log to save tokens)
 router.post('/ai/start', requireAuth, async (req, res) => {
   try {
+    if (!groq) return res.status(503).json({ error: 'AI Baba is not configured — set GROQ_API_KEY in Vercel environment variables.' });
     const sessionId = parseInt(req.body.session_id, 10);
     if (!sessionId) return res.status(400).json({ error: 'session_id required' });
     if (!(await ownedSession(sessionId, req))) return res.status(403).json({ error: 'Forbidden' });
@@ -763,7 +769,7 @@ router.post('/ai/start', requireAuth, async (req, res) => {
         `SELECT epoch_num, elapsed_seconds, chitta_bhumi, chitta_confidence, contemplative_depth,
                 swara, swara_confidence, delta_power, theta_power, alpha_power, beta_power, gamma_power,
                 sattva, rajas, tamas, guna_label, tattva_flags
-         FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC`,
+         FROM eeg_epochs WHERE session_id = $1 ORDER BY epoch_num ASC`,
         [sessionId]
       ),
     ]);
@@ -809,6 +815,7 @@ Write in warm, flowing paragraphs — like a wise friend explaining my brainwave
 // POST /api/ai/chat — continue a conversation about a specific session
 router.post('/ai/chat', requireAuth, async (req, res) => {
   try {
+    if (!groq) return res.status(503).json({ error: 'AI Baba is not configured — set GROQ_API_KEY in Vercel environment variables.' });
     const sessionId = parseInt(req.body.session_id, 10);
     const { message, history = [] } = req.body;
 
@@ -828,7 +835,7 @@ router.post('/ai/chat', requireAuth, async (req, res) => {
         `SELECT epoch_num, elapsed_seconds, chitta_bhumi, chitta_confidence, contemplative_depth,
                 swara, swara_confidence, delta_power, theta_power, alpha_power, beta_power, gamma_power,
                 sattva, rajas, tamas, guna_label, tattva_flags
-         FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC`,
+         FROM eeg_epochs WHERE session_id = $1 ORDER BY epoch_num ASC`,
         [sessionId]
       ),
     ]);
