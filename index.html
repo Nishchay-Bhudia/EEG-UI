@@ -83,6 +83,11 @@
         Admin Dashboard
       </button>
 
+      <!-- AI Baba Chat Button -->
+      <button class="btn btn-ai-baba" id="btn-ai-baba" style="display:none">
+        🧘 AI Baba
+      </button>
+
       <!-- Settings -->
       <button class="btn btn-ghost" id="btn-settings">⚙</button>
 
@@ -755,6 +760,61 @@
 
     </div><!-- /analytics-content -->
   </div><!-- /analytics-panel -->
+</div>
+
+
+<!-- AI BABA — Chat Modal -->
+<div id="ai-baba-overlay" class="ai-baba-overlay" style="display:none" role="dialog" aria-modal="true" aria-labelledby="ai-baba-title">
+  <div class="ai-baba-modal">
+    <div class="ai-baba-header">
+      <div class="ai-baba-header-title">
+        <span class="ai-baba-icon">🧘</span>
+        <span id="ai-baba-title" class="ai-baba-title">AI Baba</span>
+      </div>
+      <button class="ai-baba-close" id="btn-ai-baba-close" aria-label="Close AI Baba">&times;</button>
+    </div>
+    <!-- Step 1: Session Picker -->
+    <div id="ai-baba-step-pick" class="ai-baba-step">
+      <div class="ai-baba-intro">
+        <p class="ai-baba-intro-text">Namaste 🙏 I am AI Baba. I can help you understand your EEG sessions — your mental states, concentration, energy, and brainwave patterns.</p>
+        <p class="ai-baba-intro-sub">Which session would you like to explore?</p>
+      </div>
+      <div id="ai-baba-sessions-loading" class="ai-baba-loading">
+        <span class="ai-baba-spinner"></span> Loading your sessions…
+      </div>
+      <div id="ai-baba-sessions-empty" class="ai-baba-empty" style="display:none">
+        No sessions with recorded data found. Start a session and record some EEG epochs first!
+      </div>
+      <div id="ai-baba-sessions-list" class="ai-baba-sessions-list" style="display:none"></div>
+    </div>
+    <!-- Step 2: Loading Summary -->
+    <div id="ai-baba-step-loading" class="ai-baba-step" style="display:none">
+      <div class="ai-baba-summary-loading">
+        <span class="ai-baba-spinner ai-baba-spinner-lg"></span>
+        <p>AI Baba is reading your brainwaves…</p>
+      </div>
+    </div>
+    <!-- Step 3: Chat Interface -->
+    <div id="ai-baba-step-chat" class="ai-baba-step ai-baba-step-chat" style="display:none">
+      <div class="ai-baba-session-bar">
+        <span class="ai-baba-session-name" id="ai-baba-session-label">Session</span>
+        <button class="ai-baba-change-session" id="btn-ai-baba-change">↩ Change session</button>
+      </div>
+      <div class="ai-baba-messages" id="ai-baba-messages" role="log" aria-live="polite"></div>
+      <div id="ai-baba-typing" class="ai-baba-typing" style="display:none">
+        <span></span><span></span><span></span>
+      </div>
+      <div class="ai-baba-input-row">
+        <input id="ai-baba-input" class="ai-baba-input" type="text" placeholder="Ask about your session…" maxlength="600" autocomplete="off" aria-label="Message AI Baba" />
+        <button class="ai-baba-send" id="btn-ai-baba-send" aria-label="Send message">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <line x1="22" y1="2" x2="11" y2="13"></line>
+            <polygon points="22 2 15 22 11 13 2 9 22 2"></polygon>
+          </svg>
+        </button>
+      </div>
+    </div>
+  </div>
 </div>
 
 <script src="app.js"></script>
