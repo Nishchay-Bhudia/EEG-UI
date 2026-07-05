@@ -1706,7 +1706,10 @@ async function aiBabaSelectSession(sessionId, sessionName) {
     setTimeout(() => { const inp = $('ai-baba-input'); if (inp) inp.focus(); }, 100);
   } catch (err) {
     aiBabaShowStep('chat');
-    aiBabaAddMessage('assistant', 'Namaste 🙏 I had trouble loading your session data. Please try again or select a different session.', true);
+    aiBabaAddMessage('assistant',
+      'Namaste 🙏 I had trouble loading your session data.\n\n' +
+      '⚠️ Error: ' + (err.message || 'Unknown error') + '\n\n' +
+      'Please try again or select a different session.', true);
   }
 }
 
@@ -1727,7 +1730,7 @@ async function aiBabaSendMessage() {
     aiBabaChatHistory.push({ role: 'assistant', content: reply });
   } catch (err) {
     aiBabaSetTyping(false);
-    aiBabaAddMessage('assistant', 'Something went wrong. Please try again.', true);
+    aiBabaAddMessage('assistant', 'Something went wrong — ' + (err.message || 'unknown error') + '. Please try again.', true);
   }
   aiBabaSending = false;
 }
