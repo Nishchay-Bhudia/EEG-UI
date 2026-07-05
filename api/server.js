@@ -738,7 +738,7 @@ ${epochLog}
 // GET /api/ai/sessions — list the logged-in user's sessions (for the session picker UI)
 router.get('/ai/sessions', requireAuth, async (req, res) => {
   try {
-    if (!groq) return res.status(503).json({ error: 'AI Baba is not configured — set GROQ_API_KEY in Vercel environment variables.' });
+    // NOTE: no groq guard here — listing sessions is a pure DB query, no AI needed.
     const { rows } = await pool.query(
       `SELECT s.id, s.name, s.start_time, s.end_time, s.duration_seconds,
               COUNT(e.id)::int AS epoch_count
