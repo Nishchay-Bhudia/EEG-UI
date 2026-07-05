@@ -1393,12 +1393,12 @@ window.addEventListener('resize', resizeCanvas);
 
 // ── Band colour table for wave visualization (yogic chakra associations) ─────
 const BAND_VIZ = [
-  { key: 'delta',    label: 'δ Delta',   color: '#4A6FA5' },  // Muladhara – deep blue
-  { key: 'theta',    label: 'θ Theta',   color: '#7B5EA7' },  // Svadhisthana – purple
-  { key: 'alpha',    label: 'α Alpha',   color: '#3DAA77' },  // Anahata – green
-  { key: 'low_beta', label: 'β Low',     color: '#E8A838' },  // Manipura – amber
-  { key: 'high_beta',label: 'β High',    color: '#E05030' },  // Kshipta – orange-red
-  { key: 'gamma',    label: 'γ Gamma',   color: '#B03A8A' },  // Sahasrara – magenta
+  { key: 'delta',    label: 'δ',  color: '#4A6FA5', cycles: 1.5,  speed: 0.4  },  // ~2 Hz
+  { key: 'theta',    label: 'θ',  color: '#7B5EA7', cycles: 3.0,  speed: 0.9  },  // ~6 Hz
+  { key: 'alpha',    label: 'α',  color: '#3DAA77', cycles: 5.5,  speed: 1.5  },  // ~10 Hz
+  { key: 'low_beta', label: 'β–', color: '#E8A838', cycles: 9.0,  speed: 2.8  },  // ~15 Hz
+  { key: 'high_beta',label: 'β+', color: '#E05030', cycles: 14.0, speed: 4.5  },  // ~24 Hz
+  { key: 'gamma',    label: 'γ',  color: '#B03A8A', cycles: 22.0, speed: 8.0  },  // ~40 Hz
 ];
 
 function drawWave() {
@@ -1460,38 +1460,62 @@ function drawWave() {
   ctx.moveTo(0, waveH); ctx.lineTo(W, waveH);
   ctx.stroke();
 
-  // ── BOTTOM: frequency band power bars ────────────────────────────────────
+  // ── BOTTOM: per-band waveform graphs ─────────────────────────────────────
+  // Each band gets its own lane. The wave oscillates at a speed proportional
+  // to the band's real frequency; amplitude scales with live band power.
   const bp = lastBandPowers;
-  BAND_VIZ.forEach(({ key, label, color }, idx) => {
-    const y = waveH + idx * barH;
-    const power = bp[key] || 0;
-    const fillW = Math.max(0, Math.min(1, power)) * (W - labelW);
+  const labelW2 = 26;  // narrower label column — just the symbol
+  const graphW  = W - labelW2 - 32; // leave right margin for % value
+  const TWO_PI  = Math.PI * 2;
 
-    // Background track
-    ctx.fillStyle = 'rgba(255,255,255,0.04)';
-    ctx.fillRect(labelW, y + 2, W - labelW, barH - 4);
+  BAND_VIZ.forEach(({ key, label, color, cycles, speed }, idx) => {
+    const laneY   = waveH + idx * barH;
+    const centerY = laneY + barH / 2;
+    const power   = Math.max(0, Math.min(1, bp[key] || 0));
+    const maxAmp  = (barH / 2) - 3;          // max wave amplitude in px
+    const amp     = power * maxAmp;
+    const phase   = wavePhase * speed;        // each band scrolls at its own rate
 
-    // Filled bar
-    ctx.fillStyle = color;
-    ctx.globalAlpha = 0.85;
-    ctx.fillRect(labelW, y + 2, fillW, barH - 4);
+    // Faint lane separator
+    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.moveTo(labelW2, laneY); ctx.lineTo(W, laneY);
+    ctx.stroke();
+
+    // Centre axis line (zero crossing)
+    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
+    ctx.lineWidth   = 1;
+    ctx.beginPath();
+    ctx.moveTo(labelW2, centerY); ctx.lineTo(labelW2 + graphW, centerY);
+    ctx.stroke();
+
+    // Band waveform
+    ctx.beginPath();
+    ctx.strokeStyle = color;
+    ctx.lineWidth   = amp > 2 ? 1.5 : 1;
+    ctx.globalAlpha = 0.6 + power * 0.4;     // brighter when power is high
+    for (let i = 0; i <= graphW; i++) {
+      const x = labelW2 + i;
+      const t = (i / graphW) * TWO_PI * cycles + phase;
+      const y = centerY + Math.sin(t) * amp;
+      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
+    }
+    ctx.stroke();
     ctx.globalAlpha = 1.0;
 
-    // Label (left)
-    ctx.fillStyle = color;
-    ctx.font = `bold ${Math.max(9, Math.min(11, barH - 4))}px monospace`;
+    // Band symbol on left (coloured)
+    ctx.fillStyle    = color;
+    ctx.font         = `bold ${Math.max(9, Math.min(12, barH - 2))}px monospace`;
     ctx.textBaseline = 'middle';
-    ctx.fillText(label, 2, y + barH / 2);
+    ctx.fillText(label, 2, centerY);
 
-    // Percentage value (right, inside bar if room)
-    const pct = Math.round(power * 100);
-    const pctStr = pct + '%';
-    ctx.fillStyle = '#ffffff';
-    ctx.font = `${Math.max(8, Math.min(10, barH - 5))}px monospace`;
-    const pctX = labelW + fillW - 28;
-    if (pctX > labelW + 4) {
-      ctx.fillText(pctStr, pctX, y + barH / 2);
-    }
+    // Power % on far right
+    ctx.fillStyle    = 'rgba(255,255,255,0.55)';
+    ctx.font         = `${Math.max(8, Math.min(10, barH - 3))}px monospace`;
+    ctx.textAlign    = 'right';
+    ctx.fillText(Math.round(power * 100) + '%', W - 2, centerY);
+    ctx.textAlign    = 'left';
   });
 
   requestAnimationFrame(drawWave);
