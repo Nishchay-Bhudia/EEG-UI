@@ -571,7 +571,303 @@ router.get('/admin/sessions/by-user', requireElevated, async (_req, res) => {
   }
 });
 
+// ── AI Baba (RAG Chat over EEG session data) ─────────────────────────────────
+const Groq = require('groq-sdk');
+const groq = new Groq({ apiKey: process.env.GROQ_API_KEY });
+const AI_MODEL = 'llama-3.1-8b-instant';
+
+// Hard token budget: cap full epoch log to prevent context overflow.
+// llama-3.1-8b-instant has 128K token context; each epoch line ≈ 30 tokens.
+// 400 epochs × 30 ≈ 12K tokens — safe even with system prompt + history.
+const MAX_EPOCH_LINES = 400;
+
+const EEG_SYSTEM_PROMPT = `You are AI Baba, a wise and compassionate guide specialising in EEG brainwave analysis and yogic science. You help users understand their meditation and mindfulness sessions recorded via an EEG headband.
+
+Your role:
+- Analyse the EEG session data provided and explain it in simple, accessible language
+- Help users understand their mental states, concentration levels, and energy during their session
+- Answer questions about focus, relaxation, brainwave bands, and yogic states
+- Translate technical EEG metrics into meaningful insights a non-expert can understand
+
+Key concepts you explain:
+- Chitta Bhumi states: Kshipta (scattered/restless mind), Vikshipta (distracted/oscillating mind), Ekagra (focused/concentrated mind), Niruddha (deeply absorbed/transcendent mind)
+- Contemplative depth: Surface, Emerging, Deep, Profound
+- Swara Nadi: Ida (lunar/parasympathetic/creative), Pingala (solar/sympathetic/active), Sushumna (balanced/meditative)
+- Trigunas: Sattva (clarity/purity/calm), Rajas (activity/passion/restlessness), Tamas (inertia/dullness/heaviness)
+- EEG bands: Delta (1-4 Hz, deep sleep/restoration), Theta (4-8 Hz, drowsy/creative), Alpha (8-13 Hz, relaxed/calm), Beta (13-30 Hz, active thinking), Gamma (30-50 Hz, peak insight/focus)
+
+When the user asks about concentration: Ekagra and Niruddha = concentrated, Kshipta and Vikshipta = not concentrated.
+When the user asks about relaxation: look at Alpha power (higher = more relaxed), Ida Swara, and Sattva Guna.
+When the user asks about energy: look at Rajas Guna, Pingala Swara, Beta/Gamma power.
+When the user asks about when they were most focused: find the epochs with Ekagra or Niruddha and the deepest contemplative depth.
+When asked about time-based questions (e.g. "was I concentrating at 5 minutes?"): use elapsed_seconds from the epoch log — 300s = 5 minutes.
+
+ABSOLUTE RULE — YOU MUST FOLLOW THIS WITHOUT EXCEPTION:
+If the user's question is NOT related to EEG, brainwaves, meditation, mindfulness, yogic states, or the session data in any way, you MUST reply with this exact sentence and nothing else:
+"I'm AI Baba, and I can only help you understand your EEG session data. I'm not able to answer questions on other topics — ask me something about your brainwaves or meditation session!"
+Examples of off-topic queries you must refuse: weather, sports, coding help, maths, history, news, personal life advice unrelated to meditation, recipes, jokes, general knowledge questions.`;
+
+// EEG-domain keywords — used for server-side off-topic detection
+const EEG_KEYWORDS = [
+  'eeg', 'brainwave', 'alpha', 'beta', 'theta', 'delta', 'gamma',
+  'chitta', 'kshipta', 'vikshipta', 'ekagra', 'niruddha', 'concentration',
+  'focus', 'meditation', 'mindfulness', 'swara', 'ida', 'pingala', 'sushumna',
+  'sattva', 'rajas', 'tamas', 'guna', 'epoch', 'session', 'relaxed', 'relaxation',
+  'contemplative', 'depth', 'profound', 'yogic', 'tattva', 'band', 'spectral',
+  'brainwave', 'neural', 'mental', 'state', 'power', 'signal', 'frequency',
+];
+
+// Detect if a user message looks completely off-topic before calling the LLM.
+// Returns true if the message appears to be about EEG/meditation.
+function isEegRelated(text) {
+  const lower = text.toLowerCase();
+  // Allow short follow-up questions (they inherit context from conversation)
+  if (lower.trim().length < 20) return true;
+  return EEG_KEYWORDS.some(kw => lower.includes(kw));
+}
+
+const OFF_TOPIC_REPLY = "I'm AI Baba, and I can only help you understand your EEG session data. I'm not able to answer questions on other topics — ask me something about your brainwaves or meditation session!";
+
+function buildSessionContext(session, epochs, includeFullLog = true) {
+  if (!epochs || epochs.length === 0) {
+    return `Session: "${session.name}" — no epoch data was recorded for this session.`;
+  }
+
+  const duration = session.duration_seconds
+    ? `${Math.floor(session.duration_seconds / 60)}m ${session.duration_seconds % 60}s`
+    : 'unknown';
+  const startTime = session.start_time
+    ? new Date(session.start_time).toLocaleString()
+    : 'unknown';
+
+  const chittaCounts = {};
+  const swaraCounts  = {};
+  let totalSattva = 0, totalRajas = 0, totalTamas = 0, gunaCount = 0;
+  let totalDelta  = 0, totalTheta = 0, totalAlpha = 0, totalBeta = 0, totalGamma = 0, bandCount = 0;
+  const tattvaSet = new Set();
+
+  for (const ep of epochs) {
+    if (ep.chitta_bhumi) chittaCounts[ep.chitta_bhumi] = (chittaCounts[ep.chitta_bhumi] || 0) + 1;
+    if (ep.swara)        swaraCounts[ep.swara]         = (swaraCounts[ep.swara]         || 0) + 1;
+    if (ep.sattva != null) {
+      totalSattva += parseFloat(ep.sattva);
+      totalRajas  += parseFloat(ep.rajas  || 0);
+      totalTamas  += parseFloat(ep.tamas  || 0);
+      gunaCount++;
+    }
+    if (ep.alpha_power != null) {
+      totalDelta += parseFloat(ep.delta_power || 0);
+      totalTheta += parseFloat(ep.theta_power || 0);
+      totalAlpha += parseFloat(ep.alpha_power || 0);
+      totalBeta  += parseFloat(ep.beta_power  || 0);
+      totalGamma += parseFloat(ep.gamma_power || 0);
+      bandCount++;
+    }
+    if (ep.tattva_flags && Array.isArray(ep.tattva_flags))
+      ep.tattva_flags.forEach(f => tattvaSet.add(f));
+  }
+
+  const pct          = (v, n) => n ? (v / n * 100).toFixed(1) + '%' : 'N/A';
+  const dominantChitta = Object.entries(chittaCounts).sort((a, b) => b[1] - a[1])[0];
+  const dominantSwara  = Object.entries(swaraCounts).sort((a, b)  => b[1] - a[1])[0];
+
+  // Timeline — sample up to 20 representative moments
+  const step     = Math.max(1, Math.floor(epochs.length / 20));
+  const timeline = epochs
+    .filter((_, i) => i % step === 0)
+    .map(ep => {
+      const t = ep.elapsed_seconds != null
+        ? `${Math.floor(ep.elapsed_seconds / 60)}:${String(Math.floor(ep.elapsed_seconds % 60)).padStart(2, '0')}`
+        : `ep${ep.epoch_num}`;
+      return `  [${t}] ${ep.chitta_bhumi || '?'} | ${ep.contemplative_depth || '?'} depth | ${ep.swara || '?'} | `
+           + `S:${ep.sattva      != null ? (ep.sattva      * 100).toFixed(0) : '?'}% `
+           + `R:${ep.rajas       != null ? (ep.rajas       * 100).toFixed(0) : '?'}% `
+           + `T:${ep.tamas       != null ? (ep.tamas       * 100).toFixed(0) : '?'}% | `
+           + `Alpha:${ep.alpha_power != null ? (ep.alpha_power * 100).toFixed(1) : '?'}%`;
+    });
+
+  let epochLog = '';
+  if (includeFullLog) {
+    // Hard cap: if session has more than MAX_EPOCH_LINES epochs, use uniform sampling
+    const logEpochs = epochs.length <= MAX_EPOCH_LINES
+      ? epochs
+      : epochs.filter((_, i) => i % Math.ceil(epochs.length / MAX_EPOCH_LINES) === 0);
+
+    const truncated = epochs.length > MAX_EPOCH_LINES
+      ? `\n(Note: ${epochs.length} total epochs — showing ${logEpochs.length} uniformly sampled for context window budget)`
+      : '';
+
+    epochLog = `\n--- FULL EPOCH LOG (for time-based queries) ---${truncated}\n`
+      + logEpochs.map(ep => {
+          const t = ep.elapsed_seconds != null ? Math.round(ep.elapsed_seconds) + 's' : `ep${ep.epoch_num}`;
+          return `[${t}] ${ep.chitta_bhumi || '?'}/${ep.contemplative_depth || '?'}/${ep.swara || '?'} `
+               + `S:${ep.sattva     != null ? (ep.sattva     * 100).toFixed(0) : '?'}% `
+               + `R:${ep.rajas      != null ? (ep.rajas      * 100).toFixed(0) : '?'}% `
+               + `T:${ep.tamas      != null ? (ep.tamas      * 100).toFixed(0) : '?'}% `
+               + `A:${ep.alpha_power != null ? (ep.alpha_power * 100).toFixed(1) : '?'}% `
+               + `B:${ep.beta_power  != null ? (ep.beta_power  * 100).toFixed(1) : '?'}%`;
+        }).join('\n');
+  }
+
+  return `
+=== EEG SESSION DATA ===
+Session: "${session.name}"
+Recorded: ${startTime}
+Duration: ${duration}
+Total Epochs: ${epochs.length} (each epoch ≈ 2 seconds → ~${Math.round(epochs.length * 2 / 60)} minutes of data)
+
+--- AGGREGATE STATISTICS ---
+Dominant Mental State: ${dominantChitta ? `${dominantChitta[0]} (${((dominantChitta[1] / epochs.length) * 100).toFixed(0)}% of session)` : 'N/A'}
+Full Chitta Bhumi breakdown: ${JSON.stringify(chittaCounts)}
+Dominant Swara: ${dominantSwara ? `${dominantSwara[0]} (${((dominantSwara[1] / epochs.length) * 100).toFixed(0)}% of session)` : 'N/A'}
+Swara breakdown: ${JSON.stringify(swaraCounts)}
+Average Trigunas — Sattva:${pct(totalSattva, gunaCount)} Rajas:${pct(totalRajas, gunaCount)} Tamas:${pct(totalTamas, gunaCount)}
+Average Band Powers — Delta:${pct(totalDelta, bandCount)} Theta:${pct(totalTheta, bandCount)} Alpha:${pct(totalAlpha, bandCount)} Beta:${pct(totalBeta, bandCount)} Gamma:${pct(totalGamma, bandCount)}
+Tattva Events Detected: ${tattvaSet.size > 0 ? Array.from(tattvaSet).join(', ') : 'None'}
+
+--- TIMELINE (key sampled moments) ---
+${timeline.join('\n')}
+${epochLog}
+=== END OF SESSION DATA ===`;
+}
+
+// GET /api/ai/sessions — list the logged-in user's sessions (for the session picker UI)
+router.get('/ai/sessions', requireAuth, async (req, res) => {
+  try {
+    const { rows } = await pool.query(
+      `SELECT s.id, s.name, s.start_time, s.end_time, s.duration_seconds,
+              COUNT(e.id)::int AS epoch_count
+       FROM eeg_sessions s
+       LEFT JOIN session_epochs e ON e.session_id = s.id
+       WHERE s.user_id = $1
+       GROUP BY s.id
+       ORDER BY s.start_time DESC`,
+      [req.session.userId]
+    );
+    res.json(rows);
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/ai/start — generate an AI summary for a session (no full epoch log to save tokens)
+router.post('/ai/start', requireAuth, async (req, res) => {
+  try {
+    const sessionId = parseInt(req.body.session_id, 10);
+    if (!sessionId) return res.status(400).json({ error: 'session_id required' });
+    if (!(await ownedSession(sessionId, req))) return res.status(403).json({ error: 'Forbidden' });
+
+    const [{ rows: sessionRows }, { rows: epochs }] = await Promise.all([
+      pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]),
+      pool.query(
+        `SELECT epoch_num, elapsed_seconds, chitta_bhumi, chitta_confidence, contemplative_depth,
+                swara, swara_confidence, delta_power, theta_power, alpha_power, beta_power, gamma_power,
+                sattva, rajas, tamas, guna_label, tattva_flags
+         FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC`,
+        [sessionId]
+      ),
+    ]);
+
+    if (!sessionRows[0]) return res.status(404).json({ error: 'Session not found' });
+
+    // For the summary, use stats + timeline only (no full epoch log = smaller prompt)
+    const context = buildSessionContext(sessionRows[0], epochs, /* includeFullLog= */ false);
+
+    const completion = await groq.chat.completions.create({
+      model: AI_MODEL,
+      messages: [
+        { role: 'system', content: EEG_SYSTEM_PROMPT },
+        {
+          role: 'user',
+          content: `${context}
+
+Please give me a warm, friendly, and easy-to-understand summary of this EEG session. Cover:
+1. What mental state I was mostly in and what that felt like
+2. How concentrated or focused I was overall
+3. What my Swara (energy channel) tells us about my physiological state
+4. What my Triguna balance reveals about my mind quality
+5. The most interesting pattern or moment in the session
+6. One practical encouragement or actionable takeaway
+
+Write in warm, flowing paragraphs — like a wise friend explaining my brainwaves to me. No bullet points.`,
+        },
+      ],
+      temperature: 0.7,
+      max_tokens: 700,
+    });
+
+    res.json({
+      summary:     completion.choices[0].message.content,
+      session:     sessionRows[0],
+      epoch_count: epochs.length,
+    });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
+// POST /api/ai/chat — continue a conversation about a specific session
+router.post('/ai/chat', requireAuth, async (req, res) => {
+  try {
+    const sessionId = parseInt(req.body.session_id, 10);
+    const { message, history = [] } = req.body;
+
+    if (!sessionId || !message)      return res.status(400).json({ error: 'session_id and message required' });
+    if (message.trim().length === 0)  return res.status(400).json({ error: 'Message cannot be empty' });
+    if (message.trim().length > 600)  return res.status(400).json({ error: 'Message too long (max 600 chars)' });
+    if (!(await ownedSession(sessionId, req))) return res.status(403).json({ error: 'Forbidden' });
+
+    // Server-side off-topic guard — fast path, no LLM call needed
+    if (!isEegRelated(message)) {
+      return res.json({ reply: OFF_TOPIC_REPLY });
+    }
+
+    const [{ rows: sessionRows }, { rows: epochs }] = await Promise.all([
+      pool.query('SELECT * FROM eeg_sessions WHERE id = $1', [sessionId]),
+      pool.query(
+        `SELECT epoch_num, elapsed_seconds, chitta_bhumi, chitta_confidence, contemplative_depth,
+                swara, swara_confidence, delta_power, theta_power, alpha_power, beta_power, gamma_power,
+                sattva, rajas, tamas, guna_label, tattva_flags
+         FROM session_epochs WHERE session_id = $1 ORDER BY epoch_num ASC`,
+        [sessionId]
+      ),
+    ]);
+
+    if (!sessionRows[0]) return res.status(404).json({ error: 'Session not found' });
+
+    // Full epoch log included for detailed follow-up questions (capped at MAX_EPOCH_LINES)
+    const context = buildSessionContext(sessionRows[0], epochs, /* includeFullLog= */ true);
+
+    // Sanitise history — keep last 10 exchanges, cap each message at 800 chars
+    const safeHistory = (Array.isArray(history) ? history : [])
+      .slice(-20)
+      .filter(m => m && m.role && m.content && typeof m.content === 'string')
+      .map(m => ({
+        role:    m.role === 'user' ? 'user' : 'assistant',
+        content: String(m.content).slice(0, 800),
+      }));
+
+    const completion = await groq.chat.completions.create({
+      model: AI_MODEL,
+      messages: [
+        { role: 'system', content: `${EEG_SYSTEM_PROMPT}\n\n${context}` },
+        ...safeHistory,
+        { role: 'user', content: message },
+      ],
+      temperature: 0.7,
+      max_tokens: 450,
+    });
+
+    const reply = completion.choices[0].message.content;
+    res.json({ reply });
+  } catch (e) {
+    res.status(500).json({ error: e.message });
+  }
+});
+
 // ── Mount router & export ─────────────────────────────────────────────────────
 app.use('/api', router);
+
+
 
 module.exports = app;
