@@ -32,8 +32,8 @@ const MUSE_PPG_UUIDS = {
 const PPG_SAMPLE_RATE = 64;
 const PPG_WINDOW_SAMPLES = PPG_SAMPLE_RATE * 8; // 8-second window
 
-const DEPTH_PCT = { Surface: 12, Emerging: 37, Deep: 62, Profound: 94 };
-const CHITTA_DEPTHS = { Kshipta: 'Surface', Vikshipta: 'Emerging', Ekagra: 'Deep', Niruddha: 'Profound' };
+const DEPTH_PCT = { 'Deep Inertia': 3, Surface: 12, Emerging: 37, Deep: 62, Profound: 94 };
+const CHITTA_DEPTHS = { Mudha: 'Deep Inertia', Kshipta: 'Surface', Vikshipta: 'Emerging', Ekagra: 'Deep', Niruddha: 'Profound' };
 const SWARA_NOTES = {
   ida: 'Parasympathetic dominance. Receptive, creative and introspective state.',
   pingala: 'Sympathetic dominance. Active, analytical and goal-directed focus.',
@@ -80,6 +80,9 @@ let bleSamTick = 0;
     const waveBuf = new Float32Array(WAVE_LEN);
 let waveTail = 0;
 let wavePhase = 0;
+
+// Band power state — updated each epoch; used by drawWave for live bar display
+let lastBandPowers = { delta: 0.15, theta: 0.18, alpha: 0.28, low_beta: 0.18, high_beta: 0.13, gamma: 0.08 };
 
 // Replay Player state
 let replayEpochs = [];
@@ -943,17 +946,29 @@ function classifyLocal(bp) {
 }
 
 // ── Demo mode ─────────────────────────────────────────────────────────────────
+// All 5 Chitta Bhumis (v2 adds Mudha). Cycle through them in demo.
 const DEMO_STATES = ['Kshipta','Vikshipta','Ekagra','Niruddha'];
 const DEMO_SWARA = [
-  'Ida Nadi — right hemisphere dominant',
-  'Pingala Nadi — left hemisphere dominant',
-  'Sushumna — both nadis balanced',
+  'Ida (Parasympathetic / Lunar)',
+  'Pingala (Sympathetic / Solar)',
+  'Sushumna (Balanced / Central)',
 ];
+// Band powers aligned with paper's exact EEG signatures (see data_generator.py)
+// high_beta (18-30 Hz) is the PRIMARY Rajas marker — shown separately from low_beta.
 const DEMO_BANDS = {
-  Kshipta:  { delta:0.08, theta:0.15, alpha:0.22, beta:0.40, gamma:0.15 },
-  Vikshipta:{ delta:0.12, theta:0.22, alpha:0.28, beta:0.28, gamma:0.10 },
-  Ekagra:   { delta:0.10, theta:0.20, alpha:0.42, beta:0.20, gamma:0.08 },
-  Niruddha: { delta:0.08, theta:0.35, alpha:0.38, beta:0.12, gamma:0.07 },
+  Mudha:    { delta:0.44, theta:0.17, alpha:0.07, low_beta:0.15, high_beta:0.10, gamma:0.04, beta:0.25 },
+  Kshipta:  { delta:0.09, theta:0.12, alpha:0.12, low_beta:0.22, high_beta:0.33, gamma:0.10, beta:0.55 },
+  Vikshipta:{ delta:0.14, theta:0.17, alpha:0.26, low_beta:0.21, high_beta:0.14, gamma:0.08, beta:0.35 },
+  Ekagra:   { delta:0.08, theta:0.29, alpha:0.37, low_beta:0.12, high_beta:0.07, gamma:0.07, beta:0.19 },
+  Niruddha: { delta:0.05, theta:0.18, alpha:0.30, low_beta:0.10, high_beta:0.05, gamma:0.32, beta:0.15 },
+};
+// Approximate gunas from paper's specifications for each state (for demo accuracy)
+const DEMO_GUNAS = {
+  Mudha:    { sattva:0.20, rajas:0.15, tamas:0.65, label:'Tamasic',  note:'Tamas predominates — heaviness and dullness. Stimulating pranayama recommended.' },
+  Kshipta:  { sattva:0.12, rajas:0.73, tamas:0.15, label:'Rajasic',  note:'Rajas predominates — high-beta desynchronization, prefrontal hyperarousal.' },
+  Vikshipta:{ sattva:0.52, rajas:0.32, tamas:0.16, label:'Balanced', note:'The three Gunas are in relative equilibrium — a balanced, transitional state.' },
+  Ekagra:   { sattva:0.78, rajas:0.12, tamas:0.10, label:'Sattvic',  note:'Sattva predominates — alpha synchrony and Fm-θ. Optimal for contemplative practice.' },
+  Niruddha: { sattva:0.88, rajas:0.07, tamas:0.05, label:'Sattvic',  note:'Deep Sattva — global gamma coherence. Gunatita: beyond the three Gunas.' },
 };
 
 $('btn-demo').addEventListener('click', () => {
@@ -968,36 +983,65 @@ $('btn-demo').addEventListener('click', () => {
   setStatus('demo', 'demo mode');
   $('btn-demo').textContent = '⏹ Stop Demo';
 
+  const ALL_DEMO_STATES = ['Mudha','Kshipta','Vikshipta','Ekagra','Niruddha'];
   const runDemo = () => {
     demoEpoch++;
-    const state = DEMO_STATES[demoStateIdx % DEMO_STATES.length];
+    const state = ALL_DEMO_STATES[demoStateIdx % ALL_DEMO_STATES.length];
     const swara = DEMO_SWARA[demoSwaraIdx % DEMO_SWARA.length];
     const bp = { ...DEMO_BANDS[state] };
-    const asym = (Math.random()-0.5)*0.3;
-    const isIda = asym<-0.04, isPingala = asym>0.04;
+
+    // Add realistic jitter to band powers
+    Object.keys(bp).forEach(k => { bp[k] = Math.max(0.01, bp[k] + (Math.random()-0.5)*0.03); });
+
+    const faa = swara.includes('Ida') ? -(0.15+Math.random()*0.25)
+      : swara.includes('Pingala') ? (0.15+Math.random()*0.25)
+      : (Math.random()-0.5)*0.10;
+    const isIda = faa < -0.15, isPingala = faa > 0.15;
+
+    // Build probabilities using paper's scoring logic (simplified)
+    const rawScores = {
+      Mudha:    Math.max(0, bp.delta - 0.30) * 3.0 + Math.max(0, 0.10 - bp.alpha) * 2.0,
+      Kshipta:  Math.max(0, bp.high_beta - 0.15) * 4.0 + Math.max(0, 0.15 - bp.alpha) * 2.0,
+      Vikshipta:Math.max(0, bp.alpha - 0.10) * 2.0 + 0.8,
+      Ekagra:   Math.max(0, bp.theta - 0.20) * 3.0 + Math.max(0, bp.alpha - 0.25) * 3.0,
+      Niruddha: Math.max(0, bp.gamma - 0.15) * 4.0,
+    };
+    const scoreTotal = Object.values(rawScores).reduce((a,b) => a+b, 1e-6);
     const probs = {};
-    DEMO_STATES.forEach(s => { probs[s] = (Math.random()*100).toFixed(1)+'%'; });
+    ALL_DEMO_STATES.forEach(s => { probs[s] = rawScores[s] / scoreTotal; });
+    // Bias winner toward current state
+    probs[state] = Math.max(probs[state], 0.45);
+    const biasTotal = Object.values(probs).reduce((a,b) => a+b, 0);
+    ALL_DEMO_STATES.forEach(s => { probs[s] /= biasTotal; });
 
     const tattva = [];
-    if (bp.alpha>0.35) tattva.push('Pratyahara Window');
-    if (bp.theta>0.28) tattva.push('Potential Tattva Activation');
-    if (bp.gamma>0.12) tattva.push('Gamma Spike');
+    if (bp.alpha > 0.35 && bp.high_beta < 0.10) tattva.push('Pratyahara Window');
+    if (bp.theta  > 0.28) tattva.push('Fm-θ Activation (Frontal Midline Theta)');
+    if (bp.gamma  > 0.15) tattva.push('Gamma Surge — Ajna/Sahasrara activation');
+    if (bp.delta  > 0.40 && bp.alpha < 0.10) tattva.push('Tamasic State — Kapalabhati recommended');
+    if (bp.high_beta > 0.30) tattva.push('High-Beta Agitation — Nadi Shodhana recommended');
 
     epoch++;
     const depth = CHITTA_DEPTHS[state];
+    const gunas = { ...DEMO_GUNAS[state] };
+    const swaraKey = isIda ? 'ida' : isPingala ? 'pingala' : 'sushumna';
     const r = {
-      epoch, latency_ms: 18+Math.random()*8,
+      epoch, latency_ms: 18 + Math.random() * 8,
       data_quality: '✓ demo',
-      chitta_bhumi: { state, depth, confidence: probs[state], probabilities: probs },
-      swara: { state: swara, confidence: 'Moderate', note: isIda ? SWARA_NOTES.ida : isPingala ? SWARA_NOTES.pingala : SWARA_NOTES.sushumna },
-      band_powers: { relative: bp },
+      chitta_bhumi: { state, depth, confidence: probs[state].toFixed(3), probabilities: probs },
+      swara: {
+        state:      swara,
+        confidence: 'Moderate',
+        note:       SWARA_NOTES[swaraKey],
+      },
+      band_powers:  { relative: bp },
       eeg_spectrum: bp,
-      alpha_asymmetry: asym,
+      alpha_asymmetry: faa,
       tattva_flags: tattva,
       contemplative_depth: depth,
-      gunas: { sattva: +(Math.random()*0.6).toFixed(3), rajas: +(Math.random()*0.3).toFixed(3), tamas: +(Math.random()*0.1).toFixed(3) },
+      gunas,
       blood_oxygen: +(96 + Math.random() * 3).toFixed(1),
-      heart_rate: Math.round(60 + Math.random() * 25),
+      heart_rate:   Math.round(60 + Math.random() * 25),
     };
     applyReading(r);
     storeEpochToSession(r);
@@ -1347,6 +1391,16 @@ function resizeCanvas() {
 
 window.addEventListener('resize', resizeCanvas);
 
+// ── Band colour table for wave visualization (yogic chakra associations) ─────
+const BAND_VIZ = [
+  { key: 'delta',    label: 'δ Delta',   color: '#4A6FA5' },  // Muladhara – deep blue
+  { key: 'theta',    label: 'θ Theta',   color: '#7B5EA7' },  // Svadhisthana – purple
+  { key: 'alpha',    label: 'α Alpha',   color: '#3DAA77' },  // Anahata – green
+  { key: 'low_beta', label: 'β Low',     color: '#E8A838' },  // Manipura – amber
+  { key: 'high_beta',label: 'β High',    color: '#E05030' },  // Kshipta – orange-red
+  { key: 'gamma',    label: 'γ Gamma',   color: '#B03A8A' },  // Sahasrara – magenta
+];
+
 function drawWave() {
   const canvas = $('eeg-canvas');
   if (!canvas) return;
@@ -1354,8 +1408,14 @@ function drawWave() {
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
 
+  // ── Layout: top 52% = raw EEG trace, bottom 48% = band power bars ──────
+  const waveH  = Math.floor(H * 0.52);
+  const barAreaH = H - waveH;
+  const barH   = Math.floor(barAreaH / BAND_VIZ.length);
+  const labelW = 52; // px reserved for label on left
+
+  // ── TOP: raw EEG trace ──────────────────────────────────────────────────
   if (mode === 'bluetooth' && bleSamTick > 0) {
-    // Draw from BLE samples
     const ch0 = bleChannels[0];
     const len = Math.min(ch0.length, WAVE_LEN);
     if (len > 1) {
@@ -1365,24 +1425,74 @@ function drawWave() {
       for (let i = 0; i < len; i++) {
         const x = (i / (len - 1)) * W;
         const v = ch0[ch0.length - len + i];
-        const y = H / 2 - v * H * 400; // scale to visible range
+        const y = waveH / 2 - v * waveH * 400;
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
       ctx.stroke();
     }
   } else {
-    // Synthetic idle wave
+    // Synthetic idle wave — composite of all active bands
     wavePhase += 0.04;
+    const bp = lastBandPowers;
     ctx.beginPath();
     ctx.strokeStyle = 'var(--accent, #56A67A)';
     ctx.lineWidth = 1.5;
     for (let i = 0; i < WAVE_LEN; i++) {
       const x = (i / (WAVE_LEN - 1)) * W;
-      const y = H/2 + Math.sin(i * 0.1 + wavePhase) * 15 + Math.sin(i * 0.03 + wavePhase * 0.3) * 8;
+      const t = i * 0.1 + wavePhase;
+      // Synthesise a wave whose frequency content matches the current band powers
+      const y = waveH / 2
+        + Math.sin(t * 0.35) * 12 * (bp.delta    || 0.15)   // delta ~low freq
+        + Math.sin(t * 0.65) * 10 * (bp.theta    || 0.18)   // theta
+        + Math.sin(t * 1.2)  * 14 * (bp.alpha    || 0.28)   // alpha
+        + Math.sin(t * 2.2)  *  8 * (bp.low_beta || 0.18)   // low beta
+        + Math.sin(t * 3.8)  *  5 * (bp.high_beta|| 0.13)   // high beta
+        + Math.sin(t * 6.5)  *  3 * (bp.gamma    || 0.08);  // gamma
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     }
     ctx.stroke();
   }
+
+  // ── Separator line ───────────────────────────────────────────────────────
+  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
+  ctx.lineWidth = 1;
+  ctx.beginPath();
+  ctx.moveTo(0, waveH); ctx.lineTo(W, waveH);
+  ctx.stroke();
+
+  // ── BOTTOM: frequency band power bars ────────────────────────────────────
+  const bp = lastBandPowers;
+  BAND_VIZ.forEach(({ key, label, color }, idx) => {
+    const y = waveH + idx * barH;
+    const power = bp[key] || 0;
+    const fillW = Math.max(0, Math.min(1, power)) * (W - labelW);
+
+    // Background track
+    ctx.fillStyle = 'rgba(255,255,255,0.04)';
+    ctx.fillRect(labelW, y + 2, W - labelW, barH - 4);
+
+    // Filled bar
+    ctx.fillStyle = color;
+    ctx.globalAlpha = 0.85;
+    ctx.fillRect(labelW, y + 2, fillW, barH - 4);
+    ctx.globalAlpha = 1.0;
+
+    // Label (left)
+    ctx.fillStyle = color;
+    ctx.font = `bold ${Math.max(9, Math.min(11, barH - 4))}px monospace`;
+    ctx.textBaseline = 'middle';
+    ctx.fillText(label, 2, y + barH / 2);
+
+    // Percentage value (right, inside bar if room)
+    const pct = Math.round(power * 100);
+    const pctStr = pct + '%';
+    ctx.fillStyle = '#ffffff';
+    ctx.font = `${Math.max(8, Math.min(10, barH - 5))}px monospace`;
+    const pctX = labelW + fillW - 28;
+    if (pctX > labelW + 4) {
+      ctx.fillText(pctStr, pctX, y + barH / 2);
+    }
+  });
 
   requestAnimationFrame(drawWave);
 }
@@ -1416,9 +1526,10 @@ function applyReading(r) {
   const depth = ch.depth || CHITTA_DEPTHS[state] || 'Surface';
   const depthPct = DEPTH_PCT[depth] ?? 12;
   const depthFill = $('depth-fill');
-  const depthColor = state === 'Kshipta' ? 'var(--kshipta)'
+  const depthColor = state === 'Mudha'     ? '#4A3060'       // deep inertia — dark purple
+    : state === 'Kshipta'   ? 'var(--kshipta)'
     : state === 'Vikshipta' ? 'var(--vikshipta)'
-    : state === 'Ekagra' ? 'var(--ekagra)' : 'var(--niruddha)';
+    : state === 'Ekagra'    ? 'var(--ekagra)' : 'var(--niruddha)';
   if (depthFill) {
     depthFill.style.width = depthPct + '%';
     depthFill.style.background = depthColor;
@@ -1430,9 +1541,10 @@ function applyReading(r) {
   if (depthEl) depthEl.textContent = depth;
 
   const probs = ch.probabilities || {};
-  ['Kshipta', 'Vikshipta', 'Ekagra', 'Niruddha'].forEach(s => {
+  // All 5 Chitta Bhumis (v2 adds Mudha)
+  ['Mudha', 'Kshipta', 'Vikshipta', 'Ekagra', 'Niruddha'].forEach(s => {
     const raw = probs[s] ?? '0%';
-    const pct = parseFloat(raw);
+    const pct = typeof raw === 'number' ? raw * 100 : parseFloat(raw);
     const key = s.toLowerCase();
     const el = $('prob-' + key);
     const bar = $('bar-' + key);
@@ -1483,8 +1595,9 @@ function applyReading(r) {
 
   // ── Spectral Band Powers ──
   const spectrum = r.eeg_spectrum || (r.band_powers && r.band_powers.relative) || {};
-  const bands = ['delta', 'theta', 'alpha', 'beta', 'gamma'];
-  bands.forEach(b => {
+  // Show all 6 bands (high_beta and low_beta are new in v2; beta = combined fallback)
+  const allBands = ['delta', 'theta', 'alpha', 'low_beta', 'high_beta', 'beta', 'gamma'];
+  allBands.forEach(b => {
     const raw = spectrum[b] ?? null;
     const pctVal = raw != null ? Math.round(raw * 100) : null;
     const barEl = $('bar-' + b);
@@ -1492,6 +1605,16 @@ function applyReading(r) {
     if (barEl) barEl.style.width = (pctVal ?? 0) + '%';
     if (valEl) valEl.textContent = pctVal != null ? pctVal + '%' : '—';
   });
+
+  // Update band power state for canvas visualization
+  lastBandPowers = {
+    delta:    spectrum.delta     ?? lastBandPowers.delta,
+    theta:    spectrum.theta     ?? lastBandPowers.theta,
+    alpha:    spectrum.alpha     ?? lastBandPowers.alpha,
+    low_beta: spectrum.low_beta  ?? (spectrum.beta != null ? spectrum.beta * 0.55 : lastBandPowers.low_beta),
+    high_beta:spectrum.high_beta ?? (spectrum.beta != null ? spectrum.beta * 0.45 : lastBandPowers.high_beta),
+    gamma:    spectrum.gamma     ?? lastBandPowers.gamma,
+  };
 
   // ── Tattva flags ──
   const flags = r.tattva_flags || [];
