@@ -1685,7 +1685,10 @@ async function openAiBaba() {
     }
   } catch (err) {
     if (loadingEl) loadingEl.style.display = 'none';
-    if (emptyEl) { emptyEl.textContent = 'Failed to load sessions. Please try again.'; emptyEl.style.display = ''; }
+    if (emptyEl) {
+      emptyEl.textContent = 'Failed to load sessions — ' + (err.message || 'unknown error') + '. Please try again.';
+      emptyEl.style.display = '';
+    }
   }
 }
 
