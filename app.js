@@ -1608,3 +1608,152 @@ function applyReading(r) {
 
 // ── Init ──────────────────────────────────────────────────────────────────────
 checkAuth();
+
+
+// ── AI Baba state ─────────────────────────────────────────────────────────────
+let aiBabaSessionId   = null;
+let aiBabaSessionName = '';
+let aiBabaChatHistory = [];
+let aiBabaSending     = false;
+
+function aiBabaShowStep(step) {
+  ['pick', 'loading', 'chat'].forEach(s => {
+    const el = $(`ai-baba-step-${s}`);
+    if (el) el.style.display = s === step ? '' : 'none';
+  });
+}
+
+function aiBabaAddMessage(role, text, isError = false) {
+  const msgs = $('ai-baba-messages');
+  if (!msgs) return;
+  const wrap   = document.createElement('div');
+  wrap.className = `ai-msg ai-msg-${role === 'user' ? 'user' : 'bot'}${isError ? ' ai-msg-error' : ''}`;
+  const bubble = document.createElement('div');
+  bubble.className = 'ai-msg-bubble';
+  bubble.textContent = text;
+  wrap.appendChild(bubble);
+  msgs.appendChild(wrap);
+  msgs.scrollTop = msgs.scrollHeight;
+}
+
+function aiBabaSetTyping(show) {
+  const el      = $('ai-baba-typing');
+  const sendBtn = $('btn-ai-baba-send');
+  if (el)      el.style.display = show ? 'flex' : 'none';
+  if (sendBtn) sendBtn.disabled = show;
+}
+
+async function openAiBaba() {
+  const overlay = $('ai-baba-overlay');
+  if (!overlay) return;
+  overlay.style.display = 'flex';
+  document.body.style.overflow = 'hidden';
+  aiBabaSessionId = null; aiBabaSessionName = ''; aiBabaChatHistory = [];
+  aiBabaShowStep('pick');
+  const msgs = $('ai-baba-messages'), loadingEl = $('ai-baba-sessions-loading'),
+        listEl = $('ai-baba-sessions-list'), emptyEl = $('ai-baba-sessions-empty');
+  if (msgs)      msgs.innerHTML = '';
+  if (loadingEl) loadingEl.style.display = 'flex';
+  if (listEl)    listEl.style.display    = 'none';
+  if (emptyEl)   emptyEl.style.display   = 'none';
+  try {
+    const sessions = await api('GET', '/ai/sessions');
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (!sessions || sessions.length === 0) { if (emptyEl) emptyEl.style.display = ''; return; }
+    if (listEl) {
+      listEl.innerHTML = sessions.map(s => {
+        const date = s.start_time ? new Date(s.start_time).toLocaleDateString(undefined, { day: 'numeric', month: 'short', year: 'numeric' }) : '—';
+        const time = s.start_time ? new Date(s.start_time).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' }) : '';
+        const dur  = s.duration_seconds ? `${Math.floor(s.duration_seconds / 60)}m ${s.duration_seconds % 60}s` : '—';
+        const epochs = s.epoch_count || 0, hasData = epochs > 0;
+        return `<div class="ai-baba-session-item" data-id="${escHtml(String(s.id))}" data-name="${escHtml(s.name || 'Session')}"
+                     ${!hasData ? 'style="opacity:0.5;pointer-events:none" aria-disabled="true"' : 'tabindex="0" role="button"'}>
+          <div class="ai-baba-session-item-name">${escHtml(s.name || 'Untitled Session')}</div>
+          <div class="ai-baba-session-item-meta">
+            <span>${escHtml(date)}${time ? ' · ' + escHtml(time) : ''}</span>
+            <span>${escHtml(dur)}</span>
+            <span>${epochs} epoch${epochs !== 1 ? 's' : ''}</span>
+          </div>
+          ${!hasData ? '<div class="ai-baba-session-item-nodata">No EEG data recorded</div>' : ''}
+        </div>`;
+      }).join('');
+      listEl.style.display = '';
+      listEl.querySelectorAll('.ai-baba-session-item[tabindex="0"]').forEach(item => {
+        item.addEventListener('click', () => aiBabaSelectSession(item.dataset.id, item.dataset.name));
+        item.addEventListener('keydown', e => { if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); aiBabaSelectSession(item.dataset.id, item.dataset.name); } });
+      });
+    }
+  } catch (err) {
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (emptyEl) { emptyEl.textContent = 'Failed to load sessions. Please try again.'; emptyEl.style.display = ''; }
+  }
+}
+
+async function aiBabaSelectSession(sessionId, sessionName) {
+  aiBabaSessionId = sessionId; aiBabaSessionName = sessionName; aiBabaChatHistory = [];
+  const msgs = $('ai-baba-messages'); if (msgs) msgs.innerHTML = '';
+  const label = $('ai-baba-session-label'); if (label) label.textContent = sessionName;
+  aiBabaShowStep('loading');
+  try {
+    const data = await api('POST', '/ai/start', { session_id: sessionId });
+    aiBabaShowStep('chat');
+    const summary = data.summary || 'Here is a summary of your session.';
+    aiBabaAddMessage('assistant', summary);
+    aiBabaChatHistory.push({ role: 'assistant', content: summary });
+    setTimeout(() => { const inp = $('ai-baba-input'); if (inp) inp.focus(); }, 100);
+  } catch (err) {
+    aiBabaShowStep('chat');
+    aiBabaAddMessage('assistant', 'Namaste 🙏 I had trouble loading your session data. Please try again or select a different session.', true);
+  }
+}
+
+async function aiBabaSendMessage() {
+  if (aiBabaSending || !aiBabaSessionId) return;
+  const input = $('ai-baba-input'); if (!input) return;
+  const text = input.value.trim(); if (!text) return;
+  input.value = ''; aiBabaSending = true;
+  aiBabaAddMessage('user', text);
+  aiBabaChatHistory.push({ role: 'user', content: text });
+  aiBabaSetTyping(true);
+  const msgs = $('ai-baba-messages'); if (msgs) msgs.scrollTop = msgs.scrollHeight;
+  try {
+    const data = await api('POST', '/ai/chat', { session_id: aiBabaSessionId, message: text, history: aiBabaChatHistory.slice(-20) });
+    aiBabaSetTyping(false);
+    const reply = data.reply || 'I could not process that. Please try again.';
+    aiBabaAddMessage('assistant', reply);
+    aiBabaChatHistory.push({ role: 'assistant', content: reply });
+  } catch (err) {
+    aiBabaSetTyping(false);
+    aiBabaAddMessage('assistant', 'Something went wrong. Please try again.', true);
+  }
+  aiBabaSending = false;
+}
+
+function closeAiBaba() {
+  const overlay = $('ai-baba-overlay'); if (overlay) overlay.style.display = 'none';
+  document.body.style.overflow = ''; aiBabaSending = false;
+}
+
+(function initAiBaba() {
+  const openBtn = $('btn-ai-baba'), closeBtn = $('btn-ai-baba-close'),
+        overlay = $('ai-baba-overlay'), changeBtn = $('btn-ai-baba-change'),
+        sendBtn = $('btn-ai-baba-send'), input = $('ai-baba-input');
+  if (openBtn)   openBtn.addEventListener('click', openAiBaba);
+  if (closeBtn)  closeBtn.addEventListener('click', closeAiBaba);
+  if (changeBtn) changeBtn.addEventListener('click', openAiBaba);
+  if (sendBtn)   sendBtn.addEventListener('click', aiBabaSendMessage);
+  if (overlay)   overlay.addEventListener('click', e => { if (e.target === overlay) closeAiBaba(); });
+  if (input)     input.addEventListener('keydown', e => { if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); aiBabaSendMessage(); } });
+  document.addEventListener('keydown', e => { if (e.key === 'Escape') { const ov = $('ai-baba-overlay'); if (ov && ov.style.display !== 'none') closeAiBaba(); } });
+})();
+
+// Button visibility — syncs with header using computed style (reliable across all display methods)
+(function aiBabaButtonVisibility() {
+  const header = $('main-header'), btn = $('btn-ai-baba');
+  if (!header || !btn) return;
+  function syncVisibility() {
+    btn.style.display = window.getComputedStyle(header).display !== 'none' ? '' : 'none';
+  }
+  new MutationObserver(syncVisibility).observe(header, { attributes: true, attributeFilter: ['style', 'class'] });
+  syncVisibility();
+})();
