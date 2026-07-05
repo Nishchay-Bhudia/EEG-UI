@@ -575,10 +575,25 @@ router.get('/admin/sessions/by-user', requireElevated, async (_req, res) => {
 const Groq = require('groq-sdk');
 // FIX: Guard Groq init — without this, missing GROQ_API_KEY throws at module load time,
 // crashing the entire Vercel function before Express can handle any request (including login).
-const groq = process.env.GROQ_API_KEY
-  ? new Groq({ apiKey: process.env.GROQ_API_KEY })
+// FIX: .trim() the key — copy/pasting from a terminal or the Groq dashboard often drags
+// along a trailing newline/space, which makes the key "present" but invalid.
+const GROQ_API_KEY = (process.env.GROQ_API_KEY || '').trim();
+const groq = GROQ_API_KEY
+  ? new Groq({ apiKey: GROQ_API_KEY })
   : null;
 const AI_MODEL = 'llama-3.1-8b-instant';
+
+// FIX: Diagnostic endpoint — hit GET /api/ai/health in the browser to check, without
+// guessing, whether Vercel is actually passing GROQ_API_KEY into this function at runtime.
+// Never returns the key itself, only whether it's present and roughly what it looks like.
+router.get('/ai/health', (req, res) => {
+  res.json({
+    groqConfigured: !!groq,
+    keyLength: GROQ_API_KEY.length || 0,
+    keyPrefix: GROQ_API_KEY ? GROQ_API_KEY.slice(0, 4) + '…' : null,
+    nodeEnv: process.env.VERCEL_ENV || process.env.NODE_ENV || 'unknown',
+  });
+});
 
 // Hard token budget: cap full epoch log to prevent context overflow.
 // llama-3.1-8b-instant has 128K token context; each epoch line ≈ 30 tokens.
