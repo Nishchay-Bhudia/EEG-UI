@@ -1392,15 +1392,6 @@ function resizeCanvas() {
 window.addEventListener('resize', resizeCanvas);
 
 // ── Band colour table for wave visualization (yogic chakra associations) ─────
-const BAND_VIZ = [
-  { key: 'delta',    label: 'δ',  color: '#4A6FA5', cycles: 1.5,  speed: 0.4  },  // ~2 Hz
-  { key: 'theta',    label: 'θ',  color: '#7B5EA7', cycles: 3.0,  speed: 0.9  },  // ~6 Hz
-  { key: 'alpha',    label: 'α',  color: '#3DAA77', cycles: 5.5,  speed: 1.5  },  // ~10 Hz
-  { key: 'low_beta', label: 'β–', color: '#E8A838', cycles: 9.0,  speed: 2.8  },  // ~15 Hz
-  { key: 'high_beta',label: 'β+', color: '#E05030', cycles: 14.0, speed: 4.5  },  // ~24 Hz
-  { key: 'gamma',    label: 'γ',  color: '#B03A8A', cycles: 22.0, speed: 8.0  },  // ~40 Hz
-];
-
 function drawWave() {
   const canvas = $('eeg-canvas');
   if (!canvas) return;
@@ -1408,115 +1399,47 @@ function drawWave() {
   const W = canvas.width, H = canvas.height;
   ctx.clearRect(0, 0, W, H);
 
-  // ── Layout: top 52% = raw EEG trace, bottom 48% = band power bars ──────
-  const waveH  = Math.floor(H * 0.52);
-  const barAreaH = H - waveH;
-  const barH   = Math.floor(barAreaH / BAND_VIZ.length);
-  const labelW = 52; // px reserved for label on left
+  const cy = H / 2; // vertical centre of canvas
 
-  // ── TOP: raw EEG trace ──────────────────────────────────────────────────
   if (mode === 'bluetooth' && bleSamTick > 0) {
+    // ── Live BLE: draw raw EEG samples ──────────────────────────────────
     const ch0 = bleChannels[0];
     const len = Math.min(ch0.length, WAVE_LEN);
     if (len > 1) {
       ctx.beginPath();
       ctx.strokeStyle = 'var(--accent, #56A67A)';
-      ctx.lineWidth = 1.5;
+      ctx.lineWidth = 2;
       for (let i = 0; i < len; i++) {
         const x = (i / (len - 1)) * W;
-        const v = ch0[ch0.length - len + i];
-        const y = waveH / 2 - v * waveH * 400;
+        const y = cy - ch0[ch0.length - len + i] * H * 400;
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
       ctx.stroke();
     }
   } else {
-    // Synthetic idle wave — composite of all active bands
-    wavePhase += 0.04;
+    // ── Demo / idle: one smooth slow wave ───────────────────────────────
+    // Advance phase slowly so the wave scrolls at a calm, readable pace.
+    wavePhase += 0.015;
     const bp = lastBandPowers;
+
+    // Two gentle sinusoids — a slow swell (alpha-shaped) and a subtle
+    // faster ripple (beta-shaped) — blended into one single line.
+    const swell  = (bp.alpha || 0.28) * (H * 0.30); // large slow component
+    const ripple = ((bp.low_beta || 0.18) + (bp.high_beta || 0.13)) * (H * 0.06);
+
     ctx.beginPath();
     ctx.strokeStyle = 'var(--accent, #56A67A)';
-    ctx.lineWidth = 1.5;
-    for (let i = 0; i < WAVE_LEN; i++) {
-      const x = (i / (WAVE_LEN - 1)) * W;
-      const t = i * 0.1 + wavePhase;
-      // Synthesise a wave whose frequency content matches the current band powers
-      const y = waveH / 2
-        + Math.sin(t * 0.35) * 12 * (bp.delta    || 0.15)   // delta ~low freq
-        + Math.sin(t * 0.65) * 10 * (bp.theta    || 0.18)   // theta
-        + Math.sin(t * 1.2)  * 14 * (bp.alpha    || 0.28)   // alpha
-        + Math.sin(t * 2.2)  *  8 * (bp.low_beta || 0.18)   // low beta
-        + Math.sin(t * 3.8)  *  5 * (bp.high_beta|| 0.13)   // high beta
-        + Math.sin(t * 6.5)  *  3 * (bp.gamma    || 0.08);  // gamma
+    ctx.lineWidth = 2;
+    for (let i = 0; i <= WAVE_LEN; i++) {
+      const x = (i / WAVE_LEN) * W;
+      const t = (i / WAVE_LEN) * Math.PI * 4 + wavePhase; // ~2 full cycles across canvas
+      const y = cy
+        + Math.sin(t)          * swell          // slow primary swell
+        + Math.sin(t * 2.6)    * ripple;        // subtle faster ripple on top
       i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
     }
     ctx.stroke();
   }
-
-  // ── Separator line ───────────────────────────────────────────────────────
-  ctx.strokeStyle = 'rgba(255,255,255,0.08)';
-  ctx.lineWidth = 1;
-  ctx.beginPath();
-  ctx.moveTo(0, waveH); ctx.lineTo(W, waveH);
-  ctx.stroke();
-
-  // ── BOTTOM: per-band waveform graphs ─────────────────────────────────────
-  // Each band gets its own lane. The wave oscillates at a speed proportional
-  // to the band's real frequency; amplitude scales with live band power.
-  const bp = lastBandPowers;
-  const labelW2 = 26;  // narrower label column — just the symbol
-  const graphW  = W - labelW2 - 32; // leave right margin for % value
-  const TWO_PI  = Math.PI * 2;
-
-  BAND_VIZ.forEach(({ key, label, color, cycles, speed }, idx) => {
-    const laneY   = waveH + idx * barH;
-    const centerY = laneY + barH / 2;
-    const power   = Math.max(0, Math.min(1, bp[key] || 0));
-    const maxAmp  = (barH / 2) - 3;          // max wave amplitude in px
-    const amp     = power * maxAmp;
-    const phase   = wavePhase * speed;        // each band scrolls at its own rate
-
-    // Faint lane separator
-    ctx.strokeStyle = 'rgba(255,255,255,0.05)';
-    ctx.lineWidth   = 1;
-    ctx.beginPath();
-    ctx.moveTo(labelW2, laneY); ctx.lineTo(W, laneY);
-    ctx.stroke();
-
-    // Centre axis line (zero crossing)
-    ctx.strokeStyle = 'rgba(255,255,255,0.07)';
-    ctx.lineWidth   = 1;
-    ctx.beginPath();
-    ctx.moveTo(labelW2, centerY); ctx.lineTo(labelW2 + graphW, centerY);
-    ctx.stroke();
-
-    // Band waveform
-    ctx.beginPath();
-    ctx.strokeStyle = color;
-    ctx.lineWidth   = amp > 2 ? 1.5 : 1;
-    ctx.globalAlpha = 0.6 + power * 0.4;     // brighter when power is high
-    for (let i = 0; i <= graphW; i++) {
-      const x = labelW2 + i;
-      const t = (i / graphW) * TWO_PI * cycles + phase;
-      const y = centerY + Math.sin(t) * amp;
-      i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
-    }
-    ctx.stroke();
-    ctx.globalAlpha = 1.0;
-
-    // Band symbol on left (coloured)
-    ctx.fillStyle    = color;
-    ctx.font         = `bold ${Math.max(9, Math.min(12, barH - 2))}px monospace`;
-    ctx.textBaseline = 'middle';
-    ctx.fillText(label, 2, centerY);
-
-    // Power % on far right
-    ctx.fillStyle    = 'rgba(255,255,255,0.55)';
-    ctx.font         = `${Math.max(8, Math.min(10, barH - 3))}px monospace`;
-    ctx.textAlign    = 'right';
-    ctx.fillText(Math.round(power * 100) + '%', W - 2, centerY);
-    ctx.textAlign    = 'left';
-  });
 
   requestAnimationFrame(drawWave);
 }
