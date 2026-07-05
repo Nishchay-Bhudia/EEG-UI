@@ -587,11 +587,18 @@ const AI_MODEL = 'llama-3.1-8b-instant';
 // guessing, whether Vercel is actually passing GROQ_API_KEY into this function at runtime.
 // Never returns the key itself, only whether it's present and roughly what it looks like.
 router.get('/ai/health', (req, res) => {
+  // FIX: list any env var *names* that look Groq-related (never values) — this catches a
+  // typo/wrong-casing in the Vercel dashboard, or the var existing under a different name.
+  const groqLikeVarNames = Object.keys(process.env).filter(k => /groq/i.test(k));
   res.json({
     groqConfigured: !!groq,
     keyLength: GROQ_API_KEY.length || 0,
     keyPrefix: GROQ_API_KEY ? GROQ_API_KEY.slice(0, 4) + '…' : null,
+    groqLikeVarNames,
+    totalEnvVarCount: Object.keys(process.env).length,
     nodeEnv: process.env.VERCEL_ENV || process.env.NODE_ENV || 'unknown',
+    vercelUrl: process.env.VERCEL_URL || null,
+    vercelGitCommitSha: process.env.VERCEL_GIT_COMMIT_SHA || null,
   });
 });
 
