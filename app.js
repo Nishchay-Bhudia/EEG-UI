@@ -1151,17 +1151,32 @@ async function connectBluetooth() {
     // this is the ONE step reconnectMuseDevice() below cannot repeat on
     // its own, which is why we keep hold of the resulting `device` object
     // (btDevice) for the lifetime of the page rather than re-requesting it.
-    const device = await navigator.bluetooth.requestDevice({
-      filters: [{ services: [MUSE_SERVICE_UUID] }],
-      optionalServices: [MUSE_SERVICE_UUID],
-    });
+    //
+    // iOS browsers (Bluefy, WebBLE, etc.) wrap Apple's CoreBluetooth, which
+    // — per platform restriction, not a bug in these apps — only matches a
+    // `services` filter against UUIDs the peripheral actually advertises in
+    // its BLE advertisement packet. If a Muse unit's firmware doesn't put
+    // 0xFE8D in its advertisement (some don't; it's only guaranteed to be
+    // there via GATT after connecting), the filtered request finds nothing
+    // and the chooser looks empty or fails outright — even though the same
+    // device pairs fine on desktop/Android. acceptAllDevices sidesteps this
+    // by listing every nearby BLE device instead, so you can pick the Muse
+    // by name even when service-based filtering can't see it yet.
+    const requestOpts = isIOSDevice()
+      ? { acceptAllDevices: true, optionalServices: [MUSE_SERVICE_UUID] }
+      : { filters: [{ services: [MUSE_SERVICE_UUID] }], optionalServices: [MUSE_SERVICE_UUID] };
+    const device = await navigator.bluetooth.requestDevice(requestOpts);
     btDevice = device;
     device.addEventListener('gattserverdisconnected', onBtDisconnected);
     await setupMuseConnection(device);
   } catch (err) {
-    if (!err.message?.includes('cancelled')) {
+    if (!err.message?.includes('cancelled') && !err.message?.includes('User cancelled')) {
       console.warn('BT connect failed:', err.message);
       setStatus('error', 'BT failed: ' + err.message);
+      // Surfaced via alert(), not just console/status text, because on a
+      // phone there's usually no devtools open to read console.warn from —
+      // this is the only way to actually see what went wrong and report it.
+      alert('Bluetooth connection failed: ' + err.message);
     }
   }
 }
@@ -1180,6 +1195,33 @@ const _musePPGHandlers = {
 };
 
 /**
+ * getCharacteristic + startNotifications + addEventListener, with a short
+ * retry on transient failure. iOS Web-Bluetooth wrappers (Bluefy, WebBLE)
+ * are noticeably flakier here than desktop/Android Chrome — the previous
+ * bare `.catch(() => null)` gave up permanently after the first hiccup,
+ * silently losing that channel (and, for PPG, making hasPPG wrongly read
+ * false) for the whole connection.
+ */
+async function subscribeMuseChar(service, uuid, handler, attempts = 3) {
+  for (let i = 0; i < attempts; i++) {
+    try {
+      const char = await service.getCharacteristic(uuid);
+      char.removeEventListener('characteristicvaluechanged', handler);
+      await char.startNotifications();
+      char.addEventListener('characteristicvaluechanged', handler);
+      return char;
+    } catch (err) {
+      if (i === attempts - 1) {
+        console.warn(`[BLE] subscribe failed for ${uuid} after ${attempts} attempt(s):`, err.message);
+        return null;
+      }
+      await new Promise(r => setTimeout(r, 250));
+    }
+  }
+  return null;
+}
+
+/**
  * GATT connect + Muse protocol setup + characteristic subscriptions for an
  * already-authorized device. Split out from connectBluetooth() so both the
  * initial pairing flow and Sleep Mode's reconnect logic (which reuses the
@@ -1188,6 +1230,12 @@ const _musePPGHandlers = {
  */
 async function setupMuseConnection(device) {
   const server = await device.gatt.connect();
+  if (isIOSDevice()) {
+    // iOS Web-Bluetooth wrappers sometimes need a beat before service
+    // discovery succeeds reliably right after connecting — harmless
+    // elsewhere, so it's only added here rather than for every platform.
+    await new Promise(r => setTimeout(r, 250));
+  }
   const service = await server.getPrimaryService(MUSE_SERVICE_UUID);
 
   const controlChar = await service.getCharacteristic(MUSE_CONTROL_UUID).catch(() => null);
@@ -1210,11 +1258,7 @@ async function setupMuseConnection(device) {
   }
 
   for (let c = 0; c < MUSE_EEG_UUIDS.length; c++) {
-    const char = await service.getCharacteristic(MUSE_EEG_UUIDS[c]).catch(() => null);
-    if (!char) continue;
-    char.removeEventListener('characteristicvaluechanged', _museEEGHandlers[c]);
-    await char.startNotifications();
-    char.addEventListener('characteristicvaluechanged', _museEEGHandlers[c]);
+    await subscribeMuseChar(service, MUSE_EEG_UUIDS[c], _museEEGHandlers[c]);
   }
 
   // Muse S PPG subscription for heart rate and SpO2 (Muse 2 has no PPG
@@ -1222,12 +1266,8 @@ async function setupMuseConnection(device) {
   // which is how hasPPG distinguishes the two boards).
   const subscribedPPG = [];
   for (const [key, uuid] of Object.entries(MUSE_PPG_UUIDS)) {
-    const ppgChar = await service.getCharacteristic(uuid).catch(() => null);
-    if (!ppgChar) continue;
-    ppgChar.removeEventListener('characteristicvaluechanged', _musePPGHandlers[key]);
-    await ppgChar.startNotifications();
-    ppgChar.addEventListener('characteristicvaluechanged', _musePPGHandlers[key]);
-    subscribedPPG.push(key);
+    const ppgChar = await subscribeMuseChar(service, uuid, _musePPGHandlers[key]);
+    if (ppgChar) subscribedPPG.push(key);
   }
   // HR needs 'ir'; SpO2 needs both 'ir' and 'red' — require both before
   // claiming this device actually has usable PPG.
