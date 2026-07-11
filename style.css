@@ -178,52 +178,8 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); min-
 .bt-device-name { font-size: 13px; font-weight: 600; color: var(--text); flex: 1; }
 
 /* ─── MAIN CONTENT GRID ──────────────────────────────────── */
-.main-content { max-width: 1200px; margin: 0 auto; padding: 24px; padding-bottom: 64px; }
+.main-content { max-width: 1200px; margin: 0 auto; padding: 24px; }
 .dashboard-grid { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: 16px; }
-
-/* ─── SENSOR STATUS BAR (fixed bottom) ──────────────────────
-   Shows BLE connection state, per-electrode signal quality (TP9/AF7/
-   AF8/TP10 — the real Muse layout), PPG availability, and epoch buffer
-   progress. Visible only while the main dashboard is shown. */
-.sensor-status-bar {
-  position: fixed;
-  left: 0; right: 0; bottom: 0;
-  z-index: 150;
-  display: flex;
-  align-items: center;
-  gap: 20px;
-  padding: 8px 20px;
-  background: rgba(247,246,242,0.95);
-  backdrop-filter: blur(12px);
-  -webkit-backdrop-filter: blur(12px);
-  border-top: 1px solid var(--border);
-  font-size: 12px;
-  color: var(--text-mid);
-}
-.sensor-status-bt { display: flex; align-items: center; gap: 6px; flex-shrink: 0; }
-.sensor-status-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--text-muted); flex-shrink: 0; }
-.sensor-status-dot.connected { background: #56A67A; }
-.sensor-status-dot.error     { background: #C75C5C; }
-
-.sensor-diagram { width: 40px; height: 40px; flex-shrink: 0; }
-.sensor-head-outline { fill: var(--bg-card-2); stroke: var(--border); stroke-width: 2; }
-.sensor-head-nose    { fill: var(--border); }
-.sensor-electrode {
-  stroke: var(--bg-card); stroke-width: 1.5; fill: var(--text-muted);
-  transition: fill 0.2s;
-}
-.sensor-electrode[data-quality="good"]    { fill: #56A67A; }
-.sensor-electrode[data-quality="noisy"]   { fill: #E0A030; }
-.sensor-electrode[data-quality="off"]     { fill: #C75C5C; }
-.sensor-electrode[data-quality="unknown"] { fill: var(--text-muted); }
-
-.sensor-status-ppg, .sensor-status-buffer { color: var(--text-muted); white-space: nowrap; }
-.sensor-status-buffer { margin-left: auto; }
-
-@media (max-width: 600px) {
-  .sensor-status-bar { gap: 12px; padding: 6px 12px; font-size: 11px; }
-  .sensor-status-buffer { display: none; }
-}
 
 .card { background: var(--bg-card); border: 1px solid var(--border); border-radius: var(--radius-md); padding: 18px; box-shadow: var(--shadow-sm); }
 .card-label { font-size: 10px; font-weight: 700; letter-spacing: 0.08em; text-transform: uppercase; color: var(--text-muted); margin-bottom: 12px; }

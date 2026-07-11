@@ -97,13 +97,6 @@ const bleChannels = [[], [], [], []];
 let blePhase = 0;
 let bleSamTick = 0;
 
-// ── Per-channel signal quality (real Muse layout: TP9, AF7, AF8, TP10) ─────
-const CHANNEL_LABELS = ['TP9', 'AF7', 'AF8', 'TP10'];
-const SIGNAL_AMPLITUDE_UV_MAX = 300;   // matches backend ARTIFACT_AMPLITUDE_UV
-const SIGNAL_FLATLINE_STD_UV  = 0.5;   // below this = poor/no electrode contact
-let channelQuality = ['unknown', 'unknown', 'unknown', 'unknown'];
-let lastSensorRenderTs = 0;
-
 // PPG state (Muse S heart rate / SpO2)
     const ppgBuf = { ambient: [], ir: [], red: [] };
     let latestHeartRate = null;
@@ -119,6 +112,14 @@ let wavePhase = 0;
 
 // Band power state — updated each epoch; used by drawWave for live bar display
 let lastBandPowers = { delta: 0.15, theta: 0.18, alpha: 0.28, low_beta: 0.18, high_beta: 0.13, gamma: 0.08 };
+
+// Guna display smoothing — Sattva/Rajas/Tamas are a slower-moving state
+// than raw per-epoch classification noise; a low alpha means each new
+// reading only nudges the displayed values a little, so the bars (and the
+// dominant-guna label, recomputed from the smoothed values so the two stay
+// consistent) settle over roughly 15-30s instead of flickering every epoch.
+let smoothedGunas = null;
+const GUNA_SMOOTHING_ALPHA = 0.10;
 
 // Replay Player state
 let replayEpochs = [];
@@ -189,7 +190,6 @@ function showLoginScreen() {
   $('main-header').style.display = 'none';
   $('main-content').style.display = 'none';
   $('admin-page').style.display = 'none';
-  $('sensor-status-bar').style.display = 'none';
 }
 
 function showMainApp() {
@@ -197,8 +197,6 @@ function showMainApp() {
   $('main-header').style.display = '';
   $('main-content').style.display = '';
   $('admin-page').style.display = 'none';
-  $('sensor-status-bar').style.display = '';
-  renderSensorStatus();
 
   $('user-avatar-initial').textContent = (currentUser.username[0] || '?').toUpperCase();
   $('user-display-name').textContent = currentUser.username;
@@ -227,7 +225,6 @@ function showAdminPage() {
   $('main-header').style.display = '';
   $('main-content').style.display = 'none';
   $('admin-page').style.display = '';
-  $('sensor-status-bar').style.display = 'none';
 
   const isCoAdmin = currentUser.role === 'co-admin';
   const usersTabBtn = document.querySelector('.admin-tab[data-tab="users"]');
@@ -690,6 +687,7 @@ async function loadReplayData() {
   stopReplay();
   replayEpochs = [];
   replayIndex = 0;
+  smoothedGunas = null; // don't carry a live-session bias into replay
   const noData = $('replay-no-data');
   const stateDisplay = $('replay-state-display');
   const slider = $('replay-slider');
@@ -955,6 +953,56 @@ function softmax(logits) {
   return ex.map(e=>e/s);
 }
 
+// ── Local Guna (Sattva/Rajas/Tamas) computation ────────────────────────────
+// Mirrors satva_classifier.py's band-power/PLV scoring (decoupled from
+// FAA/Swara — Guna intensity and Nadi lateralization are separate
+// constructs, see that file). classifyLocal() previously never computed
+// gunas at all, so whenever the backend was unreachable or rejected an
+// epoch, gunas silently went blank even though everything else (Chitta
+// Bhumi, Swara) kept updating via the local fallback.
+const CHITTA_GUNA_ADJ = {
+  Niruddha:  [ 0.5, -0.3, -0.3],
+  Ekagra:    [ 0.4, -0.2, -0.2],
+  Vikshipta: [ 0.0,  0.1,  0.0],
+  Kshipta:   [-0.2,  0.4, -0.1],
+  Mudha:     [-0.3, -0.2,  0.5],
+};
+
+function computeGunasLocal(bp, chittaState) {
+  const alpha = bp.alpha || 0;
+  const theta = bp.theta || 0;
+  const delta = bp.delta || 0;
+  const gamma = bp.gamma || 0;
+  const betaTotal = bp.beta || 0;
+  // Local FFT only produces combined beta — split with the same 55/45
+  // low/high ratio main.py's /analyze/bands endpoint uses when high_beta
+  // isn't supplied.
+  const highBeta = bp.high_beta != null ? bp.high_beta : betaTotal * 0.45;
+  const lowBeta  = bp.low_beta  != null ? bp.low_beta  : betaTotal * 0.55;
+  const plv = 0.5; // no interhemispheric coherence available locally — neutral default, same as the backend's own fallback
+
+  let sat = alpha * 4.5 + theta * 2.5 + lowBeta * 0.8 + Math.max(0, plv - 0.50) * 2.5;
+  let raj = highBeta * 5.5 + Math.max(0, 0.20 - alpha) * 2.0 + Math.max(0, gamma - 0.10) * 0.8;
+  let tam = delta * 4.5 + Math.max(0, 0.15 - alpha) * 2.5 + Math.max(0, 0.06 - gamma) * 2.0 + Math.max(0, 0.45 - plv) * 1.0;
+
+  const adj = CHITTA_GUNA_ADJ[chittaState];
+  if (adj) {
+    sat = Math.max(0, sat + adj[0]);
+    raj = Math.max(0, raj + adj[1]);
+    tam = Math.max(0, tam + adj[2]);
+  }
+
+  sat = Math.max(sat, 0.01);
+  raj = Math.max(raj, 0.01);
+  tam = Math.max(tam, 0.01);
+  const total = sat + raj + tam;
+  const g = { sattva: sat / total, rajas: raj / total, tamas: tam / total };
+  const dominant = Object.entries(g).reduce((a, b) => (b[1] > a[1] ? b : a));
+  g.label = dominant[1] < 0.45 ? 'Balanced'
+    : { sattva: 'Sattvic', rajas: 'Rajasic', tamas: 'Tamasic' }[dominant[0]];
+  return g;
+}
+
 function classifyLocal(bp) {
   const states = ['Kshipta','Vikshipta','Ekagra','Niruddha'];
   const logits = [
@@ -994,6 +1042,7 @@ function classifyLocal(bp) {
     alpha_asymmetry: asym,
     tattva_flags: tattva,
     contemplative_depth: depth,
+    gunas: computeGunasLocal(bp, state),
   };
 }
 
@@ -1034,6 +1083,7 @@ $('btn-demo').addEventListener('click', () => {
   // connection — otherwise its retry loop keeps running in the background
   // and can silently flip mode back to 'bluetooth' mid-demo.
   if (mode === 'bluetooth' || mode === 'reconnecting') disconnectBluetooth();
+  smoothedGunas = null; // fresh start — don't inherit a bias from before
   mode = 'demo';
   setStatus('demo', 'demo mode');
   $('btn-demo').textContent = '⏹ Stop Demo';
@@ -1181,6 +1231,9 @@ async function connectBluetooth() {
     const device = await navigator.bluetooth.requestDevice(requestOpts);
     btDevice = device;
     device.addEventListener('gattserverdisconnected', onBtDisconnected);
+    // Fresh pairing, not a Sleep Mode reconnect — don't carry over a guna
+    // smoothing bias from whatever was last displayed.
+    smoothedGunas = null;
     await setupMuseConnection(device);
   } catch (err) {
     if (!err.message?.includes('cancelled') && !err.message?.includes('User cancelled')) {
@@ -1299,10 +1352,7 @@ async function setupMuseConnection(device) {
   $('bt-device-row').style.display = '';
   updatePPGAvailabilityUI();
   bleChannels.forEach(ch => { ch.length = 0; });
-  channelQuality = ['unknown', 'unknown', 'unknown', 'unknown'];
   $('val-buffer').textContent = '0 / ' + COLLECT_N;
-  lastSensorRenderTs = 0;
-  renderSensorStatus();
 }
 
 function onMuseEEG(ev, ch) {
@@ -1325,86 +1375,7 @@ function onMuseEEG(ev, ch) {
   const bufEl = $('val-buffer');
   if (bufEl) bufEl.textContent = buf + ' / ' + COLLECT_N;
 
-  // Live per-channel signal quality from the most recent ~0.5s of samples,
-  // decoupled from the 2s classification epoch so the status bar is
-  // responsive even while a full epoch is still filling.
-  const tailLen = Math.min(bleChannels[ch].length, Math.round(SAMPLE_RATE * 0.5));
-  channelQuality[ch] = computeChannelQuality(bleChannels[ch].slice(-tailLen));
-  renderSensorStatus();
-
   if (bleChannels[0].length >= COLLECT_N) processBluetoothEEG();
-}
-
-/**
- * Classify one channel's recent samples as 'good' | 'noisy' | 'off'
- * (poor/no electrode contact) | 'unknown' (not enough data yet).
- *
- * 'off'   — std below SIGNAL_FLATLINE_STD_UV: a dry Muse electrode with
- *           real skin contact always shows some µV-scale noise; near-zero
- *           variance means no real contact.
- * 'noisy' — any sample beyond SIGNAL_AMPLITUDE_UV_MAX: blink/jaw/movement
- *           artifact (same threshold the backend's artifact gate uses).
- */
-function computeChannelQuality(samples) {
-  if (!samples || samples.length < 32) return 'unknown';
-  const n = samples.length;
-  const mean = samples.reduce((a, b) => a + b, 0) / n;
-  let sumSq = 0, maxAbs = 0;
-  for (const v of samples) {
-    const d = v - mean;
-    sumSq += d * d;
-    if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
-  }
-  const std = Math.sqrt(sumSq / n);
-  if (std < SIGNAL_FLATLINE_STD_UV) return 'off';
-  if (maxAbs > SIGNAL_AMPLITUDE_UV_MAX) return 'noisy';
-  return 'good';
-}
-
-/**
- * Update the bottom sensor status bar: BLE connection dot, the four
- * electrode-quality dots on the head diagram, PPG availability, and
- * epoch buffer progress. Throttled to ~6/s — quality updates arrive on
- * every BLE notification (far more often than the eye needs).
- */
-function renderSensorStatus() {
-  const now = performance.now();
-  if (now - lastSensorRenderTs < 160) return;
-  lastSensorRenderTs = now;
-
-  const bar = $('sensor-status-bar');
-  if (!bar) return;
-
-  const connected = mode === 'bluetooth';
-  const reconnecting = mode === 'reconnecting';
-
-  const dot = $('sensor-bt-dot'), label = $('sensor-bt-label');
-  if (dot) dot.className = 'sensor-status-dot' + (connected ? ' connected' : reconnecting ? ' error' : '');
-  if (label) {
-    label.textContent = connected ? (btDevice?.name || 'BLE connected')
-      : reconnecting ? '🌙 Sleep Mode: reconnecting…'
-      : 'Not connected';
-  }
-
-  CHANNEL_LABELS.forEach((name, i) => {
-    const dotEl = $('sensor-dot-' + name);
-    if (!dotEl) return;
-    const q = connected ? channelQuality[i] : 'unknown';
-    dotEl.setAttribute('data-quality', q);
-  });
-
-  const ppgLabel = $('sensor-ppg-label');
-  if (ppgLabel) {
-    ppgLabel.textContent = !connected ? 'PPG: —'
-      : !hasPPG ? 'PPG: unsupported'
-      : 'PPG: ' + (latestHeartRate != null ? latestHeartRate.toFixed(0) + ' bpm' : 'awaiting signal');
-  }
-
-  const bufLabel = $('sensor-buffer-label');
-  if (bufLabel) {
-    const buf = connected ? Math.min(bleChannels[0].length, COLLECT_N) : 0;
-    bufLabel.textContent = buf + ' / ' + COLLECT_N;
-  }
 }
 
 async function processBluetoothEEG() {
@@ -1497,15 +1468,13 @@ function disconnectBluetooth() {
   ppgBuf.ambient.length = 0; ppgBuf.ir.length = 0; ppgBuf.red.length = 0;
   latestHeartRate = null; latestHeartRateConfidence = null; latestSpO2 = null;
   hasPPG = false;
-  channelQuality = ['unknown', 'unknown', 'unknown', 'unknown'];
+  smoothedGunas = null;
   mode = 'idle';
   setStatus('', 'disconnected');
   $('btn-bluetooth').classList.remove('bt-active');
   const bufEl = $('val-buffer');
   if (bufEl) bufEl.textContent = '0 / ' + COLLECT_N;
   updatePPGAvailabilityUI();
-  lastSensorRenderTs = 0; // force immediate re-render, bypassing the throttle
-  renderSensorStatus();
 }
 
 /**
@@ -1668,8 +1637,6 @@ function beginSleepReconnect() {
   const btRow = $('bt-device-row');
   if (btRow) btRow.style.display = 'none';
   setStatus('reconnecting', 'Sleep Mode: connection lost — reconnecting…');
-  lastSensorRenderTs = 0;
-  renderSensorStatus();
   scheduleSleepReconnectAttempt();
 }
 
@@ -1950,9 +1917,13 @@ function drawWave() {
       ctx.beginPath();
       ctx.strokeStyle = 'var(--accent, #56A67A)';
       ctx.lineWidth = 2;
+      // Pixel-per-µV scale: samples are now in real µV (see the unit fix in
+      // onMuseEEG) rather than the old, ~1,000,000x-too-small volt values
+      // this constant was originally tuned against — divided by 1e6 to draw
+      // at the same visual amplitude as before, just off the corrected data.
       for (let i = 0; i < len; i++) {
         const x = (i / (len - 1)) * W;
-        const y = cy - ch0[ch0.length - len + i] * H * 400;
+        const y = cy - ch0[ch0.length - len + i] * H * 400e-6;
         i === 0 ? ctx.moveTo(x, y) : ctx.lineTo(x, y);
       }
       ctx.stroke();
@@ -1991,6 +1962,39 @@ function setStatus(cls, text) {
   const lbl = $('status-text');
   if (dot) dot.className = 'status-dot' + (cls ? ' ' + cls : '');
   if (lbl) lbl.textContent = text;
+}
+
+/**
+ * Exponential moving average over Sattva/Rajas/Tamas so the displayed
+ * values change gradually epoch-to-epoch instead of jumping around with
+ * single-epoch classification noise. Resets (smoothedGunas = null) on
+ * connect/disconnect/mode changes so a new session doesn't inherit a
+ * stale bias from a previous one.
+ */
+function smoothGunas(newGunas) {
+  if (!newGunas) return smoothedGunas;
+  if (!smoothedGunas) {
+    smoothedGunas = { sattva: newGunas.sattva ?? 0.334, rajas: newGunas.rajas ?? 0.333, tamas: newGunas.tamas ?? 0.333 };
+    return smoothedGunas;
+  }
+  const a = GUNA_SMOOTHING_ALPHA;
+  smoothedGunas = {
+    sattva: smoothedGunas.sattva * (1 - a) + (newGunas.sattva ?? smoothedGunas.sattva) * a,
+    rajas:  smoothedGunas.rajas  * (1 - a) + (newGunas.rajas  ?? smoothedGunas.rajas)  * a,
+    tamas:  smoothedGunas.tamas  * (1 - a) + (newGunas.tamas  ?? smoothedGunas.tamas)  * a,
+  };
+  return smoothedGunas;
+}
+
+/** Dominant-guna label from smoothed values, mirroring gunas_label() in satva_classifier.py. */
+function gunaDominantLabel(g) {
+  const entries = [['sattva', 'Sattvic'], ['rajas', 'Rajasic'], ['tamas', 'Tamasic']];
+  let best = entries[0], bestVal = -1;
+  entries.forEach(([k, label]) => {
+    const v = g[k] || 0;
+    if (v > bestVal) { bestVal = v; best = [k, label]; }
+  });
+  return bestVal < 0.45 ? 'Balanced' : best[1];
 }
 
 // ── Apply reading to UI ───────────────────────────────────────────────────────
@@ -2113,8 +2117,9 @@ function applyReading(r) {
       : '<span class="tattva-tag muted">None detected</span>';
   }
 
-  // ── Trigunas ──
-  const gunas = r.gunas || {};
+  // ── Trigunas (smoothed — see smoothGunas(), they shouldn't flicker
+  //    every epoch the way a raw single-epoch reading would) ──
+  const gunas = smoothGunas(r.gunas) || {};
   const gunaKeys = ['sattva', 'rajas', 'tamas'];
   gunaKeys.forEach(g => {
     const val = gunas[g] ?? null;
@@ -2125,8 +2130,7 @@ function applyReading(r) {
     if (valEl) valEl.textContent = pctVal != null ? pctVal + '%' : '—';
   });
 
-  const gunaLabel = gunas.label || (gunas.sattva > gunas.rajas && gunas.sattva > gunas.tamas ? 'Sattvic'
-    : gunas.rajas > gunas.tamas ? 'Rajasic' : gunas.tamas ? 'Tamasic' : '—');
+  const gunaLabel = r.gunas ? gunaDominantLabel(gunas) : '—';
   const gunaDominantEl = $('gunas-dominant');
   const gunaNoteEl = $('gunas-note');
   if (gunaDominantEl) gunaDominantEl.textContent = gunaLabel || '—';
