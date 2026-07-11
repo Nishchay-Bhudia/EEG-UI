@@ -131,7 +131,12 @@
         Works with Muse, BrainBit, and any BLE EEG headband. Raw EEG is
         collected for 2&thinsp;s then sent to your Render backend for full
         Random-Forest classification — or processed locally if no backend
-        is configured. Requires <code>Chrome</code> or <code>Edge</code>.
+        is configured. Requires <code>Chrome</code> or <code>Edge</code>
+        on desktop or Android. <strong>iOS/iPadOS is not supported in
+        Safari, Chrome, or any browser there</strong> — Apple does not
+        implement Web Bluetooth. On iPhone/iPad, open this page in a
+        Web-Bluetooth-capable browser app instead, such as
+        <strong>"Bluefy – Web BLE Browser"</strong> (search the App Store).
       </p>
     </div>
 
@@ -499,6 +504,31 @@
 <!-- ═══════════════════════════════════════════════════════
      BLUETOOTH WIZARD MODAL
 ════════════════════════════════════════════════════════ -->
+
+<!-- ═══════════════════════════════════════════════════════
+     SENSOR STATUS BAR (fixed bottom) — BLE state, per-electrode
+     signal quality (TP9/AF7/AF8/TP10), PPG availability, epoch buffer.
+════════════════════════════════════════════════════════ -->
+<div id="sensor-status-bar" class="sensor-status-bar" style="display:none">
+  <div class="sensor-status-bt">
+    <span class="sensor-status-dot" id="sensor-bt-dot"></span>
+    <span id="sensor-bt-label">Not connected</span>
+  </div>
+
+  <svg class="sensor-diagram" viewBox="0 0 100 100" aria-label="Electrode signal quality (top-down view)">
+    <!-- Top-down head outline: nose at top, ears at left/right -->
+    <ellipse cx="50" cy="52" rx="34" ry="40" class="sensor-head-outline" />
+    <path d="M 50 10 L 43 22 L 57 22 Z" class="sensor-head-nose" />
+    <circle cx="30" cy="26" r="6" class="sensor-electrode" id="sensor-dot-AF7" data-quality="unknown"><title>AF7 — left forehead</title></circle>
+    <circle cx="70" cy="26" r="6" class="sensor-electrode" id="sensor-dot-AF8" data-quality="unknown"><title>AF8 — right forehead</title></circle>
+    <circle cx="13" cy="66" r="6" class="sensor-electrode" id="sensor-dot-TP9" data-quality="unknown"><title>TP9 — left ear</title></circle>
+    <circle cx="87" cy="66" r="6" class="sensor-electrode" id="sensor-dot-TP10" data-quality="unknown"><title>TP10 — right ear</title></circle>
+  </svg>
+
+  <div class="sensor-status-ppg" id="sensor-ppg-label">PPG: —</div>
+
+  <div class="sensor-status-buffer" id="sensor-buffer-label">0 / 512</div>
+</div>
 
 
 <!-- ═══════════════════════════════════════════════════════

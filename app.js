@@ -72,10 +72,21 @@ const bleChannels = [[], [], [], []];
 let blePhase = 0;
 let bleSamTick = 0;
 
+// ── Per-channel signal quality (real Muse layout: TP9, AF7, AF8, TP10) ─────
+const CHANNEL_LABELS = ['TP9', 'AF7', 'AF8', 'TP10'];
+const SIGNAL_AMPLITUDE_UV_MAX = 300;   // matches backend ARTIFACT_AMPLITUDE_UV
+const SIGNAL_FLATLINE_STD_UV  = 0.5;   // below this = poor/no electrode contact
+let channelQuality = ['unknown', 'unknown', 'unknown', 'unknown'];
+let lastSensorRenderTs = 0;
+
 // PPG state (Muse S heart rate / SpO2)
     const ppgBuf = { ambient: [], ir: [], red: [] };
     let latestHeartRate = null;
+    let latestHeartRateConfidence = null;
     let latestSpO2 = null;
+    // Muse 2 has no PPG hardware at all; Muse S does. hasPPG reflects what
+    // this specific connected device actually exposed, not an assumption.
+    let hasPPG = false;
 
     const waveBuf = new Float32Array(WAVE_LEN);
 let waveTail = 0;
@@ -153,6 +164,7 @@ function showLoginScreen() {
   $('main-header').style.display = 'none';
   $('main-content').style.display = 'none';
   $('admin-page').style.display = 'none';
+  $('sensor-status-bar').style.display = 'none';
 }
 
 function showMainApp() {
@@ -160,6 +172,8 @@ function showMainApp() {
   $('main-header').style.display = '';
   $('main-content').style.display = '';
   $('admin-page').style.display = 'none';
+  $('sensor-status-bar').style.display = '';
+  renderSensorStatus();
 
   $('user-avatar-initial').textContent = (currentUser.username[0] || '?').toUpperCase();
   $('user-display-name').textContent = currentUser.username;
@@ -186,6 +200,7 @@ function showAdminPage() {
   $('main-header').style.display = '';
   $('main-content').style.display = 'none';
   $('admin-page').style.display = '';
+  $('sensor-status-bar').style.display = 'none';
 
   const isCoAdmin = currentUser.role === 'co-admin';
   const usersTabBtn = document.querySelector('.admin-tab[data-tab="users"]');
@@ -1062,9 +1077,38 @@ $('btn-bluetooth').addEventListener('click', () => {
   }
 });
 
+// Settings-panel Bluetooth controls (separate from the dashboard btn-bluetooth
+// toggle above) — previously unwired, so "Scan & Connect Headband" and
+// "Disconnect" here silently did nothing.
+$('btn-bt-scan').addEventListener('click', () => {
+  if (mode === 'bluetooth') {
+    disconnectBluetooth();
+  } else {
+    connectBluetooth();
+  }
+});
+
+$('btn-bt-disconnect').addEventListener('click', () => {
+  disconnectBluetooth();
+});
+
+function isIOSDevice() {
+  return /iP(hone|ad|od)/.test(navigator.userAgent)
+    || (navigator.platform === 'MacIntel' && navigator.maxTouchPoints > 1); // iPadOS reports as Mac
+}
+
 async function connectBluetooth() {
   if (!navigator.bluetooth) {
-    alert('Web Bluetooth is not available. Please use Chrome or Edge on desktop.');
+    if (isIOSDevice()) {
+      alert(
+        'Web Bluetooth is not supported by Safari, Chrome, or any browser on iOS/iPadOS — ' +
+        'Apple does not implement it. To connect your headband here, open this page inside ' +
+        'a Web-Bluetooth-capable browser app instead, such as "Bluefy – Web BLE Browser" ' +
+        '(free on the App Store).'
+      );
+    } else {
+      alert('Web Bluetooth is not available in this browser. Please use Chrome or Edge on desktop, or Chrome on Android.');
+    }
     return;
   }
   try {
@@ -1105,15 +1149,22 @@ async function connectBluetooth() {
       char.addEventListener('characteristicvaluechanged', ev => onMuseEEG(ev, ch));
     }
 
-    // Muse S PPG subscription for heart rate and SpO2
+    // Muse S PPG subscription for heart rate and SpO2 (Muse 2 has no PPG
+    // hardware — getCharacteristic() simply fails for all three UUIDs below,
+    // which is how hasPPG distinguishes the two boards).
+      const subscribedPPG = [];
       for (const [key, uuid] of Object.entries(MUSE_PPG_UUIDS)) {
         const ppgChar = await service.getCharacteristic(uuid).catch(() => null);
         if (!ppgChar) continue;
         await ppgChar.startNotifications();
         ppgChar.addEventListener('characteristicvaluechanged', ev => onMusePPG(ev, key));
+        subscribedPPG.push(key);
       }
+      // HR needs 'ir'; SpO2 needs both 'ir' and 'red' — require both before
+      // claiming this device actually has usable PPG.
+      hasPPG = subscribedPPG.includes('ir') && subscribedPPG.includes('red');
       ppgBuf.ambient.length = 0; ppgBuf.ir.length = 0; ppgBuf.red.length = 0;
-      latestHeartRate = null; latestSpO2 = null;
+      latestHeartRate = null; latestHeartRateConfidence = null; latestSpO2 = null;
 
       btDisconnect = () => { if (device.gatt.connected) device.gatt.disconnect(); };
 
@@ -1124,8 +1175,11 @@ async function connectBluetooth() {
     $('btn-bluetooth').classList.add('bt-active');
     $('bt-device-name').textContent = device.name || 'BLE device';
     $('bt-device-row').style.display = '';
+    updatePPGAvailabilityUI();
     bleChannels.forEach(ch => { ch.length = 0; });
+    channelQuality = ['unknown', 'unknown', 'unknown', 'unknown'];
     $('val-buffer').textContent = '0 / ' + COLLECT_N;
+    renderSensorStatus();
   } catch (err) {
     if (!err.message?.includes('cancelled')) {
       console.warn('BT connect failed:', err.message);
@@ -1139,8 +1193,13 @@ function onMuseEEG(ev, ch) {
   const samples = [];
   // FIX: safe loop — ensures we always have 2 bytes to read (i and i+1)
   for (let i = 2; i + 1 < data.byteLength; i += 2) {
-    // Convert raw int16 to microvolts (Muse scale: 0.48828125 µV/LSB)
-    samples.push(data.getInt16(i, false) * 0.48828125e-6);
+    // Convert raw int16 to microvolts (Muse scale: 0.48828125 µV/LSB).
+    // FIX: the trailing e-6 here previously converted to volts instead of
+    // microvolts (a 1,000,000x unit error) — invisible until now because
+    // relative band-power ratios, FAA (log-ratio), and PLV (phase-based)
+    // are all scale-invariant to a uniform per-sample constant. Absolute-
+    // threshold signal-quality checks (frontend and backend) are not.
+    samples.push(data.getInt16(i, false) * 0.48828125);
   }
   bleChannels[ch].push(...samples);
   bleSamTick += samples.length;
@@ -1149,7 +1208,81 @@ function onMuseEEG(ev, ch) {
   const bufEl = $('val-buffer');
   if (bufEl) bufEl.textContent = buf + ' / ' + COLLECT_N;
 
+  // Live per-channel signal quality from the most recent ~0.5s of samples,
+  // decoupled from the 2s classification epoch so the status bar is
+  // responsive even while a full epoch is still filling.
+  const tailLen = Math.min(bleChannels[ch].length, Math.round(SAMPLE_RATE * 0.5));
+  channelQuality[ch] = computeChannelQuality(bleChannels[ch].slice(-tailLen));
+  renderSensorStatus();
+
   if (bleChannels[0].length >= COLLECT_N) processBluetoothEEG();
+}
+
+/**
+ * Classify one channel's recent samples as 'good' | 'noisy' | 'off'
+ * (poor/no electrode contact) | 'unknown' (not enough data yet).
+ *
+ * 'off'   — std below SIGNAL_FLATLINE_STD_UV: a dry Muse electrode with
+ *           real skin contact always shows some µV-scale noise; near-zero
+ *           variance means no real contact.
+ * 'noisy' — any sample beyond SIGNAL_AMPLITUDE_UV_MAX: blink/jaw/movement
+ *           artifact (same threshold the backend's artifact gate uses).
+ */
+function computeChannelQuality(samples) {
+  if (!samples || samples.length < 32) return 'unknown';
+  const n = samples.length;
+  const mean = samples.reduce((a, b) => a + b, 0) / n;
+  let sumSq = 0, maxAbs = 0;
+  for (const v of samples) {
+    const d = v - mean;
+    sumSq += d * d;
+    if (Math.abs(v) > maxAbs) maxAbs = Math.abs(v);
+  }
+  const std = Math.sqrt(sumSq / n);
+  if (std < SIGNAL_FLATLINE_STD_UV) return 'off';
+  if (maxAbs > SIGNAL_AMPLITUDE_UV_MAX) return 'noisy';
+  return 'good';
+}
+
+/**
+ * Update the bottom sensor status bar: BLE connection dot, the four
+ * electrode-quality dots on the head diagram, PPG availability, and
+ * epoch buffer progress. Throttled to ~6/s — quality updates arrive on
+ * every BLE notification (far more often than the eye needs).
+ */
+function renderSensorStatus() {
+  const now = performance.now();
+  if (now - lastSensorRenderTs < 160) return;
+  lastSensorRenderTs = now;
+
+  const bar = $('sensor-status-bar');
+  if (!bar) return;
+
+  const connected = mode === 'bluetooth';
+
+  const dot = $('sensor-bt-dot'), label = $('sensor-bt-label');
+  if (dot) dot.className = 'sensor-status-dot' + (connected ? ' connected' : '');
+  if (label) label.textContent = connected ? (btDevice?.name || 'BLE connected') : 'Not connected';
+
+  CHANNEL_LABELS.forEach((name, i) => {
+    const dotEl = $('sensor-dot-' + name);
+    if (!dotEl) return;
+    const q = connected ? channelQuality[i] : 'unknown';
+    dotEl.setAttribute('data-quality', q);
+  });
+
+  const ppgLabel = $('sensor-ppg-label');
+  if (ppgLabel) {
+    ppgLabel.textContent = !connected ? 'PPG: —'
+      : !hasPPG ? 'PPG: unsupported'
+      : 'PPG: ' + (latestHeartRate != null ? latestHeartRate.toFixed(0) + ' bpm' : 'awaiting signal');
+  }
+
+  const bufLabel = $('sensor-buffer-label');
+  if (bufLabel) {
+    const buf = connected ? Math.min(bleChannels[0].length, COLLECT_N) : 0;
+    bufLabel.textContent = buf + ' / ' + COLLECT_N;
+  }
 }
 
 async function processBluetoothEEG() {
@@ -1237,12 +1370,43 @@ function disconnectBluetooth() {
   if (btRow) btRow.style.display = 'none';
   bleChannels.forEach(ch => { ch.length = 0; });
   ppgBuf.ambient.length = 0; ppgBuf.ir.length = 0; ppgBuf.red.length = 0;
-  latestHeartRate = null; latestSpO2 = null;
+  latestHeartRate = null; latestHeartRateConfidence = null; latestSpO2 = null;
+  hasPPG = false;
+  channelQuality = ['unknown', 'unknown', 'unknown', 'unknown'];
   mode = 'idle';
   setStatus('', 'disconnected');
   $('btn-bluetooth').classList.remove('bt-active');
   const bufEl = $('val-buffer');
   if (bufEl) bufEl.textContent = '0 / ' + COLLECT_N;
+  updatePPGAvailabilityUI();
+  lastSensorRenderTs = 0; // force immediate re-render, bypassing the throttle
+  renderSensorStatus();
+}
+
+/**
+ * Reflect hasPPG (and BLE connection state) in the HR/SpO2 UI. Muse 2 has
+ * no PPG hardware — without this, those readouts were previously stuck on
+ * "awaiting signal" forever with no indication the device simply can't
+ * provide the data. Call after `mode` has settled (connected/disconnected).
+ */
+function updatePPGAvailabilityUI() {
+  const hrSt = $('hr-status'), spo2St = $('spo2-status');
+  const hrEl = $('val-hr'), spo2El = $('val-spo2');
+  const connected = mode === 'bluetooth';
+  if (connected && !hasPPG) {
+    if (hrSt) hrSt.textContent = 'not supported on this device';
+    if (spo2St) spo2St.textContent = 'not supported on this device';
+    if (hrEl) hrEl.textContent = '—';
+    if (spo2El) spo2El.textContent = '—';
+  } else if (connected && hasPPG) {
+    if (hrSt) hrSt.textContent = 'awaiting signal';
+    if (spo2St) spo2St.textContent = 'awaiting signal';
+  } else {
+    if (hrSt) hrSt.textContent = 'awaiting signal';
+    if (spo2St) spo2St.textContent = 'awaiting signal';
+    if (hrEl) hrEl.textContent = '—';
+    if (spo2El) spo2El.textContent = '—';
+  }
 }
 
 function onBtDisconnected() {
@@ -1260,35 +1424,87 @@ function onMusePPG(ev, channel) {
   if (buf.length > PPG_WINDOW_SAMPLES) buf.splice(0, buf.length - PPG_WINDOW_SAMPLES);
 
   if (channel === 'ir' && buf.length >= PPG_WINDOW_SAMPLES) {
-    latestHeartRate = computeHeartRate(ppgBuf.ir);
+    const hrResult = computeHeartRate(ppgBuf.ir);
+    latestHeartRate = hrResult.bpm;
+    latestHeartRateConfidence = hrResult.confidence;
     if (ppgBuf.red.length >= PPG_WINDOW_SAMPLES) latestSpO2 = computeSpO2(ppgBuf.ir, ppgBuf.red);
     const hrEl = $('val-hr'), spo2El = $('val-spo2');
     const hrSt = $('hr-status'), spo2St = $('spo2-status');
-    if (hrEl && latestHeartRate != null) { hrEl.textContent = latestHeartRate.toFixed(0); if (hrSt) hrSt.textContent = 'live reading'; }
+    if (hrEl && latestHeartRate != null) {
+      hrEl.textContent = latestHeartRate.toFixed(0);
+      if (hrSt) {
+        hrSt.textContent = hrResult.confidence >= 0.6 ? 'live reading'
+          : hrResult.confidence >= 0.3 ? 'live reading (low confidence)'
+          : 'live reading (noisy)';
+      }
+    }
     if (spo2El && latestSpO2 != null)   { spo2El.textContent = latestSpO2.toFixed(1);   if (spo2St) spo2St.textContent = 'live reading'; }
   }
 }
 
-/** BPM from PPG IR via threshold peak detection */
+/**
+ * Lightweight bandpass for the pulse-rate range (~0.5–3.5 Hz @ 64 Hz PPG
+ * sampling): a moving-average high-pass removes baseline wander/breathing
+ * drift, then a short moving-average low-pass removes high-frequency noise.
+ * Not a proper Butterworth filter, but a standard, dependency-free way to
+ * isolate the pulse band before peak-picking.
+ */
+function bandpassPPG(signal) {
+  const hpWin = Math.round(PPG_SAMPLE_RATE * 1.0);   // ~1s window — tracks slow drift
+  const lpWin = 2;                                    // light HF smoothing
+
+  const highPassed = new Array(signal.length);
+  for (let i = 0; i < signal.length; i++) {
+    const lo = Math.max(0, i - hpWin), hi = Math.min(signal.length, i + hpWin + 1);
+    let sum = 0;
+    for (let j = lo; j < hi; j++) sum += signal[j];
+    highPassed[i] = signal[i] - sum / (hi - lo);
+  }
+
+  const out = new Array(highPassed.length);
+  for (let i = 0; i < highPassed.length; i++) {
+    const lo = Math.max(0, i - lpWin), hi = Math.min(highPassed.length, i + lpWin + 1);
+    let sum = 0;
+    for (let j = lo; j < hi; j++) sum += highPassed[j];
+    out[i] = sum / (hi - lo);
+  }
+  return out;
+}
+
+/**
+ * BPM + confidence from PPG IR via bandpass-filtered threshold peak
+ * detection. Confidence is derived from RR-interval regularity (coefficient
+ * of variation) — a real pulse is fairly periodic; motion/noise artifacts
+ * produce erratic intervals. Returns {bpm: number|null, confidence: 0-1}.
+ */
 function computeHeartRate(signal) {
-  if (signal.length < 64) return null;
-  const mean = signal.reduce((a, b) => a + b, 0) / signal.length;
-  const ac = signal.map(v => v - mean);
-  const std = Math.sqrt(ac.reduce((s, v) => s + v * v, 0) / ac.length);
+  if (signal.length < 64) return { bpm: null, confidence: 0 };
+
+  const filtered = bandpassPPG(signal);
+  const std = Math.sqrt(filtered.reduce((s, v) => s + v * v, 0) / filtered.length);
   const thr = std * 0.5;
   // 0.28 s refractory → supports up to ~214 BPM (covers athletic/stress range)
   const minDist = Math.round(PPG_SAMPLE_RATE * 0.28);
   const peaks = []; let lastPeak = -minDist;
-  for (let i = 1; i < ac.length - 1; i++) {
-    if (ac[i] > thr && ac[i] > ac[i - 1] && ac[i] > ac[i + 1] && (i - lastPeak) >= minDist) {
+  for (let i = 1; i < filtered.length - 1; i++) {
+    if (filtered[i] > thr && filtered[i] > filtered[i - 1] && filtered[i] > filtered[i + 1] && (i - lastPeak) >= minDist) {
       peaks.push(i); lastPeak = i;
     }
   }
-  if (peaks.length < 2) return null;
+  if (peaks.length < 3) return { bpm: null, confidence: 0 };
+
   const rrs = peaks.slice(1).map((p, i) => p - peaks[i]);
   const meanRR = rrs.reduce((a, b) => a + b, 0) / rrs.length;
   const hr = (60 * PPG_SAMPLE_RATE) / meanRR;
-  return (hr >= 30 && hr <= 200) ? hr : null;
+  if (hr < 30 || hr > 200) return { bpm: null, confidence: 0 };
+
+  // Coefficient of variation of RR intervals: ~0 (metronomic) → confidence
+  // ~1; >=0.3 (erratic/noisy) → confidence ~0.
+  const rrStd = Math.sqrt(rrs.reduce((s, v) => s + (v - meanRR) ** 2, 0) / rrs.length);
+  const cv = meanRR > 0 ? rrStd / meanRR : 1;
+  const confidence = Math.max(0, Math.min(1, 1 - cv / 0.3));
+
+  return { bpm: hr, confidence: +confidence.toFixed(2) };
 }
 
 /** SpO2 % from red/IR ratio-of-ratios: SpO2 ≈ 110 − 25 × R */
@@ -1600,10 +1816,27 @@ function applyReading(r) {
   const hrEl = $('val-hr');
   const spo2StatusEl = $('spo2-status');
   const hrStatusEl = $('hr-status');
+  const btNoPPG = mode === 'bluetooth' && !hasPPG;
   if (spo2El) spo2El.textContent = r.blood_oxygen != null ? r.blood_oxygen.toFixed(1) : '—';
   if (hrEl) hrEl.textContent = r.heart_rate != null ? r.heart_rate.toFixed(0) : '—';
-  if (spo2StatusEl) spo2StatusEl.textContent = r.blood_oxygen != null ? 'live reading' : 'awaiting signal';
-  if (hrStatusEl) hrStatusEl.textContent = r.heart_rate != null ? 'live reading' : 'awaiting signal';
+  if (spo2StatusEl) {
+    spo2StatusEl.textContent = r.blood_oxygen != null ? 'live reading'
+      : btNoPPG ? 'not supported on this device' : 'awaiting signal';
+  }
+  if (hrStatusEl) {
+    if (r.heart_rate == null) {
+      hrStatusEl.textContent = btNoPPG ? 'not supported on this device' : 'awaiting signal';
+    } else if (mode === 'bluetooth' && latestHeartRateConfidence != null) {
+      // Reflect the peak-detector's own confidence rather than a bare
+      // "live reading" — a noisy/low-confidence BPM still displays, but
+      // says so, instead of looking as trustworthy as a clean one.
+      hrStatusEl.textContent = latestHeartRateConfidence >= 0.6 ? 'live reading'
+        : latestHeartRateConfidence >= 0.3 ? 'live reading (low confidence)'
+        : 'live reading (noisy)';
+    } else {
+      hrStatusEl.textContent = 'live reading';
+    }
+  }
 }
 
 // ── Init ──────────────────────────────────────────────────────────────────────
