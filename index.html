@@ -139,7 +139,11 @@
         (search the App Store). In Bluefy the device picker shows
         <em>every</em> nearby Bluetooth device, not just headbands, because
         iOS won't pre-filter the list the way desktop/Android Chrome does —
-        just pick the one named "Muse…" from the list.
+        just pick the one named "Muse…" from the list. <strong>Sleep Mode</strong>
+        keeps the screen on (dimmed near-black) instead of letting it lock —
+        this is a hard limit of the web, not this app: every browser,
+        including Bluefy, stops running entirely once the screen actually
+        locks, so there's no way to record with the screen truly off.
       </p>
     </div>
 
@@ -488,7 +492,7 @@
       <button class="btn btn-secondary" id="btn-demo">
         <span class="btn-icon">▶</span> Demo
       </button>
-      <button class="btn btn-secondary" id="btn-sleep-mode" title="Keeps the headband connected overnight — auto-reconnects to the same device if it drops.">
+      <button class="btn btn-secondary" id="btn-sleep-mode" title="Keeps the headband connected overnight — auto-reconnects to the same device if it drops. Dims to a near-black display and keeps the screen ON (doesn't lock) so the connection keeps running: no website, on any browser, can keep working once the screen is actually locked.">
         <span class="btn-icon">🌙</span> Sleep Mode
       </button>
     </div>

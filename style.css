@@ -49,6 +49,43 @@
   --transition: 0.55s cubic-bezier(0.4,0,0.2,1);
 }
 
+/* ─── SLEEP DISPLAY ──────────────────────────────────────────
+   Applied to <html> while Sleep Mode is active. A Wake Lock keeps the
+   screen from auto-locking so the tab (and BLE connection) keeps
+   running — this near-black theme is what makes leaving the screen on
+   for that tolerable next to a bed. Overrides the same custom
+   properties every component already reads, so nothing else needs to
+   change. Emits minimal light; not literally off (that's not something
+   a website can do), just as close as CSS can get. */
+:root.sleep-display {
+  --bg:          #030303;
+  --bg-card:     #060605;
+  --bg-card-2:   #0A0908;
+  --accent:      #4A342A;
+  --accent-dim:  #241814;
+  --text:        #38352F;
+  --text-mid:    #262420;
+  --text-muted:  #161513;
+  --border:      #100F0D;
+  --border-light:#0C0B0A;
+
+  --kshipta:   #3A2712;
+  --vikshipta: #3A2419;
+  --ekagra:    #1C2A38;
+  --niruddha:  #241C34;
+
+  --delta:  #241A2E;
+  --theta:  #1C2A38;
+  --alpha:  #1A3226;
+  --beta:   #332212;
+  --gamma:  #331A1A;
+
+  --sattva: #3A3018;
+  --rajas:  #331A1A;
+  --tamas:  #1A2032;
+}
+:root.sleep-display body { transition: background-color 0.8s ease; }
+
 html { scroll-behavior: smooth; }
 body { background: var(--bg); color: var(--text); font-family: var(--font); min-height: 100vh; font-size: 14px; line-height: 1.5; }
 

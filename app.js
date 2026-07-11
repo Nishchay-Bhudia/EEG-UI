@@ -66,6 +66,19 @@ const SLEEP_RECONNECT_MAX_MS  = 30000;  // backoff caps at 30s, retries forever
 const SLEEP_MODE_STORAGE_KEY  = 'controlhub_sleepMode';
 const SLEEP_DEVICE_STORAGE_KEY = 'controlhub_sleepDeviceId';
 
+// A truly locked/off screen suspends JS in every iOS browser, Bluefy
+// included — no website can prevent that, it's an OS-level restriction.
+// The only thing that genuinely keeps this tab running unattended is
+// keeping the screen ON: a Screen Wake Lock (stops auto-lock) plus a
+// near-silent looping tone (the standard trick that gets iOS to grant a
+// background tab more execution time, same technique sleep-timer/white-
+// noise web apps use). Combined with a near-black "sleep display" theme
+// so an always-on screen is minimally disruptive. Best-effort only —
+// still not a guarantee if the phone is manually locked with the power
+// button, which Wake Lock cannot override.
+let wakeLock = null;
+let keepAliveCtx = null, keepAliveOsc = null, keepAliveGain = null;
+
 // Auth state
 let currentUser = null; // { id, username, role }
 
@@ -1554,6 +1567,9 @@ async function enableSleepMode() {
     localStorage.setItem(SLEEP_DEVICE_STORAGE_KEY, btDevice.id);
   } catch { /* storage unavailable (private browsing) — sleep mode still works this tab */ }
   updateSleepModeUI();
+  document.documentElement.classList.add('sleep-display');
+  await requestWakeLock();
+  startKeepAliveAudio();
   if (!activeSession) {
     await startSession('Sleep — ' + new Date().toLocaleDateString());
   }
@@ -1569,6 +1585,9 @@ function disableSleepMode() {
     localStorage.removeItem(SLEEP_DEVICE_STORAGE_KEY);
   } catch { /* ignore */ }
   updateSleepModeUI();
+  document.documentElement.classList.remove('sleep-display');
+  releaseWakeLock();
+  stopKeepAliveAudio();
   if (activeSession) endSession();
 }
 
@@ -1578,6 +1597,69 @@ function updateSleepModeUI() {
     btn.textContent = sleepModeActive ? '☀ End Sleep Mode' : '🌙 Sleep Mode';
     btn.classList.toggle('bt-active', sleepModeActive);
   }
+}
+
+/**
+ * Screen Wake Lock: stops the screen from auto-locking/dimming while
+ * Sleep Mode is on — the only thing that reliably keeps this tab's JS
+ * (and therefore the BLE connection) running. Does NOT survive the user
+ * manually pressing the physical lock button; the spec has no way to
+ * override that, by design. Released automatically by the browser
+ * whenever the tab becomes hidden, so it's re-requested on visibilitychange.
+ */
+async function requestWakeLock() {
+  if (!('wakeLock' in navigator)) return; // not supported here — fails silently
+  try {
+    wakeLock = await navigator.wakeLock.request('screen');
+    wakeLock.addEventListener('release', () => { wakeLock = null; });
+  } catch (err) {
+    console.warn('[Sleep Mode] wake lock request failed:', err.message);
+  }
+}
+
+function releaseWakeLock() {
+  if (wakeLock) { wakeLock.release().catch(() => {}); wakeLock = null; }
+}
+
+document.addEventListener('visibilitychange', () => {
+  if (sleepModeActive && document.visibilityState === 'visible' && !wakeLock) {
+    requestWakeLock();
+  }
+});
+
+/**
+ * Near-silent looping tone via Web Audio — the standard technique web
+ * apps (sleep timers, white-noise players) use to signal "active audio
+ * playback" to iOS, which grants a background tab more execution time
+ * than a silent one gets. Best-effort: it does NOT guarantee the BLE
+ * connection survives a genuinely locked screen, only extends how long
+ * the tab keeps running if it does get backgrounded. Requires a user
+ * gesture to start — the Sleep Mode button click provides that.
+ */
+function startKeepAliveAudio() {
+  if (keepAliveCtx) return;
+  try {
+    const Ctx = window.AudioContext || window.webkitAudioContext;
+    if (!Ctx) return;
+    keepAliveCtx = new Ctx();
+    keepAliveGain = keepAliveCtx.createGain();
+    keepAliveGain.gain.value = 0.0001; // inaudible, but technically "playing"
+    keepAliveOsc = keepAliveCtx.createOscillator();
+    keepAliveOsc.frequency.value = 20; // sub-audible
+    keepAliveOsc.connect(keepAliveGain);
+    keepAliveGain.connect(keepAliveCtx.destination);
+    keepAliveOsc.start();
+  } catch (err) {
+    console.warn('[Sleep Mode] keep-alive audio failed:', err.message);
+  }
+}
+
+function stopKeepAliveAudio() {
+  try {
+    if (keepAliveOsc) { keepAliveOsc.stop(); keepAliveOsc.disconnect(); keepAliveOsc = null; }
+    if (keepAliveGain) { keepAliveGain.disconnect(); keepAliveGain = null; }
+    if (keepAliveCtx) { keepAliveCtx.close(); keepAliveCtx = null; }
+  } catch { /* ignore */ }
 }
 
 function beginSleepReconnect() {
@@ -1642,6 +1724,13 @@ async function tryResumeSleepModeOnLoad() {
     sleepModeActive = true;
     sleepReconnectAttempt = 0;
     updateSleepModeUI();
+    document.documentElement.classList.add('sleep-display');
+    // Not triggered by a click, so Wake Lock / AudioContext may be
+    // refused here without a user gesture — that's fine, both fail
+    // silently and the visibilitychange listener retries the wake lock
+    // as soon as the page is actually foregrounded.
+    requestWakeLock();
+    startKeepAliveAudio();
     setStatus('reconnecting', 'Sleep Mode: resuming connection…');
     await attemptSleepReconnect();
   } catch (err) {
