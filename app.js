@@ -54,6 +54,18 @@ let pollTimer = null;
 let sseSource = null;
 let backendPollTimer = null;
 
+// Sleep Mode: keep the headband connection alive unattended overnight —
+// auto-reconnect to the same device on drop, and (best-effort) resume
+// after a page reload via navigator.bluetooth.getDevices() persistent
+// permissions, since mobile browsers commonly reload backgrounded tabs.
+let sleepModeActive = false;
+let sleepReconnectTimer = null;
+let sleepReconnectAttempt = 0;
+const SLEEP_RECONNECT_BASE_MS = 2000;   // first retry after 2s
+const SLEEP_RECONNECT_MAX_MS  = 30000;  // backoff caps at 30s, retries forever
+const SLEEP_MODE_STORAGE_KEY  = 'controlhub_sleepMode';
+const SLEEP_DEVICE_STORAGE_KEY = 'controlhub_sleepDeviceId';
+
 // Auth state
 let currentUser = null; // { id, username, role }
 
@@ -193,6 +205,8 @@ function showMainApp() {
   }
 
   loadSessionHistory();
+  updateSleepModeUI();
+  tryResumeSleepModeOnLoad();
 }
 
 function showAdminPage() {
@@ -246,6 +260,9 @@ document.addEventListener('click', () => {
 });
 
 $('btn-logout').addEventListener('click', async () => {
+  // Otherwise Sleep Mode's reconnect loop (and the BLE connection itself)
+  // would keep running invisibly behind the login screen.
+  if (mode === 'bluetooth' || mode === 'reconnecting') disconnectBluetooth();
   await api('POST', '/auth/logout').catch(() => {});
   currentUser = null;
   activeSession = null;
@@ -744,12 +761,9 @@ function updateReplayDisplay(idx) {
 }
 
 // ── Session management ────────────────────────────────────────────────────────
-$('btn-start-session').addEventListener('click', async () => {
-  const name = prompt('Session name:', 'Session ' + new Date().toLocaleDateString());
-  if (name === null) return;
-
+async function startSession(name) {
   try {
-    const sess = await api('POST', '/sessions/start', { name: name.trim() || 'New Session' });
+    const sess = await api('POST', '/sessions/start', { name: (name || '').trim() || 'New Session' });
     activeSession = sess;
     sessionStartTimestamp = new Date();
     sessionEpochCounter = 0;
@@ -767,12 +781,14 @@ $('btn-start-session').addEventListener('click', async () => {
       $('session-timer').textContent = formatTime(elapsed);
     }, 1000);
     $('session-timer').textContent = '0:00';
+    return true;
   } catch (err) {
     alert('Failed to start session: ' + err.message);
+    return false;
   }
-});
+}
 
-$('btn-end-session').addEventListener('click', async () => {
+async function endSession() {
   if (!activeSession) return;
   try {
     await api('POST', '/sessions/' + activeSession.id + '/end');
@@ -784,7 +800,15 @@ $('btn-end-session').addEventListener('click', async () => {
   $('btn-end-session').style.display = 'none';
   $('session-notes').disabled = true;
   await loadSessionHistory();
+}
+
+$('btn-start-session').addEventListener('click', () => {
+  const name = prompt('Session name:', 'Session ' + new Date().toLocaleDateString());
+  if (name === null) return;
+  startSession(name);
 });
+
+$('btn-end-session').addEventListener('click', () => { endSession(); });
 
 // ── Session notes autosave (debounced) ────────────────────────────────────────
 $('session-notes').disabled = true;
@@ -993,7 +1017,10 @@ $('btn-demo').addEventListener('click', () => {
     $('btn-demo').textContent = '▶ Demo';
     return;
   }
-  if (mode === 'bluetooth') disconnectBluetooth();
+  // Also tear down a Sleep Mode reconnect-in-progress, not just an active
+  // connection — otherwise its retry loop keeps running in the background
+  // and can silently flip mode back to 'bluetooth' mid-demo.
+  if (mode === 'bluetooth' || mode === 'reconnecting') disconnectBluetooth();
   mode = 'demo';
   setStatus('demo', 'demo mode');
   $('btn-demo').textContent = '⏹ Stop Demo';
@@ -1077,6 +1104,14 @@ $('btn-bluetooth').addEventListener('click', () => {
   }
 });
 
+$('btn-sleep-mode').addEventListener('click', () => {
+  if (sleepModeActive) {
+    disableSleepMode();
+  } else {
+    enableSleepMode();
+  }
+});
+
 // Settings-panel Bluetooth controls (separate from the dashboard btn-bluetooth
 // toggle above) — previously unwired, so "Scan & Connect Headband" and
 // "Disconnect" here silently did nothing.
@@ -1112,80 +1147,109 @@ async function connectBluetooth() {
     return;
   }
   try {
+    // requestDevice() shows the OS chooser and requires a user gesture —
+    // this is the ONE step reconnectMuseDevice() below cannot repeat on
+    // its own, which is why we keep hold of the resulting `device` object
+    // (btDevice) for the lifetime of the page rather than re-requesting it.
     const device = await navigator.bluetooth.requestDevice({
       filters: [{ services: [MUSE_SERVICE_UUID] }],
       optionalServices: [MUSE_SERVICE_UUID],
     });
     btDevice = device;
     device.addEventListener('gattserverdisconnected', onBtDisconnected);
-
-    const server = await device.gatt.connect();
-    const service = await server.getPrimaryService(MUSE_SERVICE_UUID);
-
-    const controlChar = await service.getCharacteristic(MUSE_CONTROL_UUID).catch(() => null);
-    if (controlChar) {
-      // CRITICAL FIX: Muse protocol requires a 1-byte length prefix before every command.
-      // Without the prefix the headband silently ignores the command and never streams EEG.
-      function museCmd(s) {
-        const payload = new TextEncoder().encode(s + '\n');
-        const buf = new Uint8Array(payload.length + 1);
-        buf[0] = payload.length; // length prefix byte — this is mandatory
-        buf.set(payload, 1);
-        return buf;
-      }
-      await controlChar.writeValue(museCmd('h'));    // halt any prior streaming
-      await new Promise(r => setTimeout(r, 300));
-      await controlChar.writeValue(museCmd('p21'));  // preset 21 = EEG mode
-      await new Promise(r => setTimeout(r, 300));
-      await controlChar.writeValue(museCmd('d'));    // start streaming
-      await new Promise(r => setTimeout(r, 500));   // let stream initialise before subscribing
-    }
-
-    for (let c = 0; c < MUSE_EEG_UUIDS.length; c++) {
-      const char = await service.getCharacteristic(MUSE_EEG_UUIDS[c]).catch(() => null);
-      if (!char) continue;
-      await char.startNotifications();
-      const ch = c;
-      char.addEventListener('characteristicvaluechanged', ev => onMuseEEG(ev, ch));
-    }
-
-    // Muse S PPG subscription for heart rate and SpO2 (Muse 2 has no PPG
-    // hardware — getCharacteristic() simply fails for all three UUIDs below,
-    // which is how hasPPG distinguishes the two boards).
-      const subscribedPPG = [];
-      for (const [key, uuid] of Object.entries(MUSE_PPG_UUIDS)) {
-        const ppgChar = await service.getCharacteristic(uuid).catch(() => null);
-        if (!ppgChar) continue;
-        await ppgChar.startNotifications();
-        ppgChar.addEventListener('characteristicvaluechanged', ev => onMusePPG(ev, key));
-        subscribedPPG.push(key);
-      }
-      // HR needs 'ir'; SpO2 needs both 'ir' and 'red' — require both before
-      // claiming this device actually has usable PPG.
-      hasPPG = subscribedPPG.includes('ir') && subscribedPPG.includes('red');
-      ppgBuf.ambient.length = 0; ppgBuf.ir.length = 0; ppgBuf.red.length = 0;
-      latestHeartRate = null; latestHeartRateConfidence = null; latestSpO2 = null;
-
-      btDisconnect = () => { if (device.gatt.connected) device.gatt.disconnect(); };
-
-      // Stop backend URL polling — BT mode handles data directly
-    if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = null; }
-    mode = 'bluetooth';
-    setStatus('bluetooth', 'BLE connected');
-    $('btn-bluetooth').classList.add('bt-active');
-    $('bt-device-name').textContent = device.name || 'BLE device';
-    $('bt-device-row').style.display = '';
-    updatePPGAvailabilityUI();
-    bleChannels.forEach(ch => { ch.length = 0; });
-    channelQuality = ['unknown', 'unknown', 'unknown', 'unknown'];
-    $('val-buffer').textContent = '0 / ' + COLLECT_N;
-    renderSensorStatus();
+    await setupMuseConnection(device);
   } catch (err) {
     if (!err.message?.includes('cancelled')) {
       console.warn('BT connect failed:', err.message);
       setStatus('error', 'BT failed: ' + err.message);
     }
   }
+}
+
+// Stable per-channel handler references (not fresh closures created on
+// every call) so setupMuseConnection() can safely remove-then-reattach on
+// each Sleep Mode reconnect. Chrome commonly reuses the same
+// BluetoothRemoteGATTCharacteristic object across a disconnect/reconnect
+// cycle on the same device — without this, repeated reconnects over a
+// night would stack duplicate listeners and multiply every sample.
+const _museEEGHandlers = [0, 1, 2, 3].map(ch => (ev) => onMuseEEG(ev, ch));
+const _musePPGHandlers = {
+  ambient: ev => onMusePPG(ev, 'ambient'),
+  ir:      ev => onMusePPG(ev, 'ir'),
+  red:     ev => onMusePPG(ev, 'red'),
+};
+
+/**
+ * GATT connect + Muse protocol setup + characteristic subscriptions for an
+ * already-authorized device. Split out from connectBluetooth() so both the
+ * initial pairing flow and Sleep Mode's reconnect logic (which reuses the
+ * same BluetoothDevice object without a new requestDevice() prompt) share
+ * one code path. Throws on failure — callers decide how to react.
+ */
+async function setupMuseConnection(device) {
+  const server = await device.gatt.connect();
+  const service = await server.getPrimaryService(MUSE_SERVICE_UUID);
+
+  const controlChar = await service.getCharacteristic(MUSE_CONTROL_UUID).catch(() => null);
+  if (controlChar) {
+    // CRITICAL FIX: Muse protocol requires a 1-byte length prefix before every command.
+    // Without the prefix the headband silently ignores the command and never streams EEG.
+    function museCmd(s) {
+      const payload = new TextEncoder().encode(s + '\n');
+      const buf = new Uint8Array(payload.length + 1);
+      buf[0] = payload.length; // length prefix byte — this is mandatory
+      buf.set(payload, 1);
+      return buf;
+    }
+    await controlChar.writeValue(museCmd('h'));    // halt any prior streaming
+    await new Promise(r => setTimeout(r, 300));
+    await controlChar.writeValue(museCmd('p21'));  // preset 21 = EEG mode
+    await new Promise(r => setTimeout(r, 300));
+    await controlChar.writeValue(museCmd('d'));    // start streaming
+    await new Promise(r => setTimeout(r, 500));   // let stream initialise before subscribing
+  }
+
+  for (let c = 0; c < MUSE_EEG_UUIDS.length; c++) {
+    const char = await service.getCharacteristic(MUSE_EEG_UUIDS[c]).catch(() => null);
+    if (!char) continue;
+    char.removeEventListener('characteristicvaluechanged', _museEEGHandlers[c]);
+    await char.startNotifications();
+    char.addEventListener('characteristicvaluechanged', _museEEGHandlers[c]);
+  }
+
+  // Muse S PPG subscription for heart rate and SpO2 (Muse 2 has no PPG
+  // hardware — getCharacteristic() simply fails for all three UUIDs below,
+  // which is how hasPPG distinguishes the two boards).
+  const subscribedPPG = [];
+  for (const [key, uuid] of Object.entries(MUSE_PPG_UUIDS)) {
+    const ppgChar = await service.getCharacteristic(uuid).catch(() => null);
+    if (!ppgChar) continue;
+    ppgChar.removeEventListener('characteristicvaluechanged', _musePPGHandlers[key]);
+    await ppgChar.startNotifications();
+    ppgChar.addEventListener('characteristicvaluechanged', _musePPGHandlers[key]);
+    subscribedPPG.push(key);
+  }
+  // HR needs 'ir'; SpO2 needs both 'ir' and 'red' — require both before
+  // claiming this device actually has usable PPG.
+  hasPPG = subscribedPPG.includes('ir') && subscribedPPG.includes('red');
+  ppgBuf.ambient.length = 0; ppgBuf.ir.length = 0; ppgBuf.red.length = 0;
+  latestHeartRate = null; latestHeartRateConfidence = null; latestSpO2 = null;
+
+  btDisconnect = () => { if (device.gatt.connected) device.gatt.disconnect(); };
+
+  // Stop backend URL polling — BT mode handles data directly
+  if (backendPollTimer) { clearInterval(backendPollTimer); backendPollTimer = null; }
+  mode = 'bluetooth';
+  setStatus('bluetooth', 'BLE connected');
+  $('btn-bluetooth').classList.add('bt-active');
+  $('bt-device-name').textContent = device.name || 'BLE device';
+  $('bt-device-row').style.display = '';
+  updatePPGAvailabilityUI();
+  bleChannels.forEach(ch => { ch.length = 0; });
+  channelQuality = ['unknown', 'unknown', 'unknown', 'unknown'];
+  $('val-buffer').textContent = '0 / ' + COLLECT_N;
+  lastSensorRenderTs = 0;
+  renderSensorStatus();
 }
 
 function onMuseEEG(ev, ch) {
@@ -1259,10 +1323,15 @@ function renderSensorStatus() {
   if (!bar) return;
 
   const connected = mode === 'bluetooth';
+  const reconnecting = mode === 'reconnecting';
 
   const dot = $('sensor-bt-dot'), label = $('sensor-bt-label');
-  if (dot) dot.className = 'sensor-status-dot' + (connected ? ' connected' : '');
-  if (label) label.textContent = connected ? (btDevice?.name || 'BLE connected') : 'Not connected';
+  if (dot) dot.className = 'sensor-status-dot' + (connected ? ' connected' : reconnecting ? ' error' : '');
+  if (label) {
+    label.textContent = connected ? (btDevice?.name || 'BLE connected')
+      : reconnecting ? '🌙 Sleep Mode: reconnecting…'
+      : 'Not connected';
+  }
 
   CHANNEL_LABELS.forEach((name, i) => {
     const dotEl = $('sensor-dot-' + name);
@@ -1364,6 +1433,9 @@ async function processBluetoothEEG() {
 }
 
 function disconnectBluetooth() {
+  // An explicit disconnect (user clicked Disconnect / toggled Bluetooth
+  // off) means "stop" — don't let Sleep Mode fight that by reconnecting.
+  if (sleepModeActive) disableSleepMode();
   if (btDisconnect) { btDisconnect(); btDisconnect = null; }
   btDevice = null;
   const btRow = $('bt-device-row');
@@ -1410,7 +1482,131 @@ function updatePPGAvailabilityUI() {
 }
 
 function onBtDisconnected() {
-  if (mode === 'bluetooth') disconnectBluetooth();
+  if (mode !== 'bluetooth') return;
+  // Sleep Mode: an involuntary drop (out of range, headband powered off
+  // briefly, interference) should NOT tear the session down — retry the
+  // same device instead. A deliberate disconnect never reaches this
+  // branch: disconnectBluetooth() turns Sleep Mode off *before* calling
+  // btDisconnect(), so by the time this event fires, sleepModeActive is
+  // already false and mode is already 'idle' (JS run-to-completion —
+  // gattserverdisconnected only fires on the next tick).
+  if (sleepModeActive && btDevice) {
+    beginSleepReconnect();
+  } else {
+    disconnectBluetooth();
+  }
+}
+
+// ── Sleep Mode ────────────────────────────────────────────────────────────────
+
+async function enableSleepMode() {
+  if (mode !== 'bluetooth' || !btDevice) {
+    // Sleep Mode needs a live connection to know which device to guard.
+    // This click is itself the user gesture requestDevice() needs, so
+    // it's safe to trigger pairing from here if not already connected.
+    await connectBluetooth();
+    if (mode !== 'bluetooth' || !btDevice) return; // user cancelled or it failed
+  }
+  sleepModeActive = true;
+  sleepReconnectAttempt = 0;
+  try {
+    localStorage.setItem(SLEEP_MODE_STORAGE_KEY, '1');
+    localStorage.setItem(SLEEP_DEVICE_STORAGE_KEY, btDevice.id);
+  } catch { /* storage unavailable (private browsing) — sleep mode still works this tab */ }
+  updateSleepModeUI();
+  if (!activeSession) {
+    await startSession('Sleep — ' + new Date().toLocaleDateString());
+  }
+}
+
+function disableSleepMode() {
+  sleepModeActive = false;
+  clearTimeout(sleepReconnectTimer);
+  sleepReconnectTimer = null;
+  sleepReconnectAttempt = 0;
+  try {
+    localStorage.removeItem(SLEEP_MODE_STORAGE_KEY);
+    localStorage.removeItem(SLEEP_DEVICE_STORAGE_KEY);
+  } catch { /* ignore */ }
+  updateSleepModeUI();
+  if (activeSession) endSession();
+}
+
+function updateSleepModeUI() {
+  const btn = $('btn-sleep-mode');
+  if (btn) {
+    btn.textContent = sleepModeActive ? '☀ End Sleep Mode' : '🌙 Sleep Mode';
+    btn.classList.toggle('bt-active', sleepModeActive);
+  }
+}
+
+function beginSleepReconnect() {
+  mode = 'reconnecting';
+  $('btn-bluetooth').classList.remove('bt-active');
+  const btRow = $('bt-device-row');
+  if (btRow) btRow.style.display = 'none';
+  setStatus('reconnecting', 'Sleep Mode: connection lost — reconnecting…');
+  lastSensorRenderTs = 0;
+  renderSensorStatus();
+  scheduleSleepReconnectAttempt();
+}
+
+function scheduleSleepReconnectAttempt() {
+  if (!sleepModeActive) return;
+  sleepReconnectAttempt++;
+  const delay = Math.min(SLEEP_RECONNECT_MAX_MS, SLEEP_RECONNECT_BASE_MS * Math.pow(2, sleepReconnectAttempt - 1));
+  setStatus('reconnecting', `Sleep Mode: reconnecting… (attempt ${sleepReconnectAttempt}, next try in ${Math.round(delay / 1000)}s)`);
+  clearTimeout(sleepReconnectTimer);
+  sleepReconnectTimer = setTimeout(attemptSleepReconnect, delay);
+}
+
+async function attemptSleepReconnect() {
+  if (!sleepModeActive || !btDevice) return;
+  setStatus('reconnecting', `Sleep Mode: reconnecting… (attempt ${sleepReconnectAttempt})`);
+  try {
+    await setupMuseConnection(btDevice);
+    sleepReconnectAttempt = 0; // reset backoff on success
+  } catch (err) {
+    console.warn('[Sleep Mode] reconnect attempt failed:', err.message);
+    scheduleSleepReconnectAttempt();
+  }
+}
+
+/**
+ * Best-effort resume after a page reload (mobile browsers frequently
+ * reload backgrounded tabs, which would otherwise silently end an
+ * overnight session). Relies on navigator.bluetooth.getDevices(), which
+ * returns devices this origin was previously authorized to access without
+ * a new chooser prompt — only available in Chromium browsers that support
+ * persistent Web Bluetooth permissions. No-ops gracefully everywhere else.
+ */
+async function tryResumeSleepModeOnLoad() {
+  let wasActive = false, deviceId = null;
+  try {
+    wasActive = localStorage.getItem(SLEEP_MODE_STORAGE_KEY) === '1';
+    deviceId = localStorage.getItem(SLEEP_DEVICE_STORAGE_KEY);
+  } catch { return; }
+  if (!wasActive || !deviceId || !navigator.bluetooth?.getDevices) return;
+
+  try {
+    const devices = await navigator.bluetooth.getDevices();
+    const device = devices.find(d => d.id === deviceId);
+    if (!device) {
+      // No longer authorized (revoked, or a different browser/profile) —
+      // don't keep a stale flag around.
+      disableSleepMode();
+      return;
+    }
+    btDevice = device;
+    device.addEventListener('gattserverdisconnected', onBtDisconnected);
+    sleepModeActive = true;
+    sleepReconnectAttempt = 0;
+    updateSleepModeUI();
+    setStatus('reconnecting', 'Sleep Mode: resuming connection…');
+    await attemptSleepReconnect();
+  } catch (err) {
+    console.warn('[Sleep Mode] resume-on-load failed:', err.message);
+  }
 }
 
 // ── Muse S PPG processing (heart rate + SpO2) ─────────────────────────────────

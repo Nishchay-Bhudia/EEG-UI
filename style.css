@@ -204,6 +204,7 @@ body { background: var(--bg); color: var(--text); font-family: var(--font); min-
 .status-dot.waking    { background: var(--beta); animation: pulse 1.4s ease-in-out infinite; }
 .status-dot.bluetooth { background: var(--ekagra); box-shadow: 0 0 6px var(--ekagra); }
 .status-dot.error     { background: var(--gamma); }
+.status-dot.reconnecting { background: var(--kshipta); animation: pulse 1.4s ease-in-out infinite; }
 .status-text { font-size: 12px; color: var(--text-mid); }
 
 @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.4} }
